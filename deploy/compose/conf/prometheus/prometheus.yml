@@ -1,0 +1,61 @@
+# =============================================================================
+# Prometheus 抓取配置（monitoring profile）
+# 未启用对应 profile 的目标会显示为 DOWN，属预期行为；告警规则已按 job 维度区分。
+# =============================================================================
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 30s
+  external_labels:
+    platform: tmdbwh
+    env: local
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # ClickHouse 服务端与 Keeper 内置 Prometheus 端点
+  - job_name: clickhouse
+    static_configs:
+      - targets: ["clickhouse:9363"]
+        labels:
+          component: olap
+  - job_name: clickhouse-keeper
+    static_configs:
+      - targets: ["clickhouse-keeper:9363"]
+        labels:
+          component: olap
+
+  # Flink Prometheus Reporter（JobManager / TaskManager 各自暴露 9249）
+  - job_name: flink
+    static_configs:
+      - targets: ["flink-jobmanager:9249", "flink-taskmanager:9249"]
+        labels:
+          component: realtime
+
+  # Kafka：topic offset 与消费组 lag
+  - job_name: kafka
+    static_configs:
+      - targets: ["kafka-exporter:9308"]
+        labels:
+          component: mq
+
+  # MinIO 集群指标（MINIO_PROMETHEUS_AUTH_TYPE=public）
+  - job_name: minio
+    metrics_path: /minio/v2/metrics/cluster
+    static_configs:
+      - targets: ["minio:9000"]
+        labels:
+          component: storage
+
+  # 批处理作业（采集 / 离线 / 治理）通过 Pushgateway 上报；honor_labels 保留作业自带的 job / instance 标签
+  - job_name: pushgateway
+    honor_labels: true
+    static_configs:
+      - targets: ["pushgateway:9091"]
+        labels:
+          component: batch

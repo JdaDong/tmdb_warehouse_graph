@@ -1,0 +1,49 @@
+<?xml version="1.0"?>
+<!--
+  可观测性：
+    - 日志输出到控制台（docker logs 采集），关闭文件日志
+    - Prometheus 端点 :9363/metrics（Prometheus 抓取，Grafana 大盘）
+    - system.query_log / part_log / query_views_log 保留 30 天：
+      治理模块依赖它们做 血缘解析（INSERT SELECT）、慢查询 / 成本分析、parts 健康度分析
+-->
+<clickhouse>
+    <logger>
+        <level>information</level>
+        <console>1</console>
+        <log remove="remove"/>
+        <errorlog remove="remove"/>
+    </logger>
+
+    <prometheus>
+        <endpoint>/metrics</endpoint>
+        <port>9363</port>
+        <metrics>true</metrics>
+        <events>true</events>
+        <asynchronous_metrics>true</asynchronous_metrics>
+        <errors>true</errors>
+    </prometheus>
+
+    <query_log>
+        <database>system</database>
+        <table>query_log</table>
+        <partition_by>toYYYYMM(event_date)</partition_by>
+        <ttl>event_date + INTERVAL 30 DAY DELETE</ttl>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+    </query_log>
+
+    <part_log>
+        <database>system</database>
+        <table>part_log</table>
+        <partition_by>toYYYYMM(event_date)</partition_by>
+        <ttl>event_date + INTERVAL 30 DAY DELETE</ttl>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+    </part_log>
+
+    <query_views_log>
+        <database>system</database>
+        <table>query_views_log</table>
+        <partition_by>toYYYYMM(event_date)</partition_by>
+        <ttl>event_date + INTERVAL 30 DAY DELETE</ttl>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+    </query_views_log>
+</clickhouse>

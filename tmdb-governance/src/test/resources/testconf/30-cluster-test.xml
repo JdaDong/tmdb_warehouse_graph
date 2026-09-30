@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<!--
+  集成测试专用集群配置：单分片单副本 + 本地 Keeper，
+  用于验证 SchemaMigrator 的 ON CLUSTER 注入与分布式 DDL 在真实 ClickHouse 上可执行。
+-->
+<clickhouse>
+    <remote_servers>
+        <tmdb_cluster>
+            <shard>
+                <internal_replication>true</internal_replication>
+                <replica>
+                    <host>localhost</host>
+                    <port>9000</port>
+                </replica>
+            </shard>
+        </tmdb_cluster>
+    </remote_servers>
+    <distributed_ddl>
+        <path>/clickhouse/task_queue/ddl_test</path>
+    </distributed_ddl>
+</clickhouse>

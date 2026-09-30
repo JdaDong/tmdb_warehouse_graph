@@ -1,0 +1,44 @@
+# =============================================================================
+# OpenMetadata: ClickHouse 元数据采集工作流
+#
+# 采集范围：ods / dwd / dws / ads / rt / governance 六个库（sink 中由 dbName 过滤表达式控制）
+# 运行方式：make om-ingest（需要 .env 中已配置 OM_JWT_TOKEN）
+# 注意：OpenMetadata 的 ClickHouse 连接器中 dbName 对应"单个 ClickHouse 数据库"，
+#      因此这里用 databaseFilterPattern 只采集 default 以外的业务库需按库逐个配置；
+#      本配置采集 default 库作为示例，生产环境按库复制多份工作流即可。
+# =============================================================================
+source:
+  type: clickhouse
+  serviceName: tmdb_clickhouse
+  serviceConnection:
+    config:
+      type: ClickHouse
+      hostPort: clickhouse:8123
+      username: ${CLICKHOUSE_USER:-default}
+      authType:
+        password: ${CLICKHOUSE_PASSWORD}
+      database: default
+      connectionOptions: {}
+      connectionArguments: {}
+  sourceConfig:
+    config:
+      type: DatabaseMetadata
+      markDeletedTables: true
+      includeViews: true
+      includeTags: true
+      schemaFilterPattern:
+        excludes:
+          - information_schema
+          - INFORMATION_SCHEMA
+
+sink:
+  type: metadata-rest
+  config: {}
+
+workflowConfig:
+  loggerLevel: INFO
+  openMetadataServerConfig:
+    hostPort: ${OM_SERVER_HOST_PORT:-http://openmetadata-server:8585}
+    authProvider: openmetadata
+    securityConfig:
+      jwtToken: ${OM_JWT_TOKEN}

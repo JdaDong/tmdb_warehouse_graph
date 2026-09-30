@@ -1,0 +1,11 @@
+{
+  "results": [
+    {"id": 604, "adult": false},
+    {"id": 1124, "adult": false},
+    {"id": 999999901, "adult": false},
+    {"id": 999999902, "adult": true}
+  ],
+  "page": 2,
+  "total_pages": 2,
+  "total_results": 8
+}

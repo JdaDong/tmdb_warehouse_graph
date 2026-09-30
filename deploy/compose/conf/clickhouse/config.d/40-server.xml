@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<!-- 服务端资源与稳定性参数（按本地 Compose 规格设置，生产在 Helm values 中按节点规格调整） -->
+<clickhouse>
+    <max_concurrent_queries>100</max_concurrent_queries>
+    <!-- 服务端总内存上限为容器内存的 80%，防止 OOM Kill -->
+    <max_server_memory_usage_to_ram_ratio>0.8</max_server_memory_usage_to_ram_ratio>
+    <mark_cache_size>536870912</mark_cache_size>
+    <uncompressed_cache_size>268435456</uncompressed_cache_size>
+
+    <merge_tree>
+        <!-- 分区内活跃 part 数超过阈值时减缓 / 拒绝写入，保护集群；治理模块对 parts 数做预警 -->
+        <parts_to_delay_insert>300</parts_to_delay_insert>
+        <parts_to_throw_insert>600</parts_to_throw_insert>
+        <max_suspicious_broken_parts>20</max_suspicious_broken_parts>
+    </merge_tree>
+
+    <!-- 允许通过 SQL 管理用户 / 角色 / 行级策略 / 配额（tmdb-governance 权限模块依赖） -->
+    <user_directories>
+        <local_directory>
+            <path>/var/lib/clickhouse/access/</path>
+        </local_directory>
+    </user_directories>
+</clickhouse>

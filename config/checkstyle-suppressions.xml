@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<!DOCTYPE suppressions PUBLIC
+        "-//Checkstyle//DTD SuppressionFilter Configuration 1.2//EN"
+        "https://checkstyle.org/dtds/suppressions_1_2.dtd">
+<!-- 规范豁免清单：新增豁免必须附带原因，并在代码评审中确认 -->
+<suppressions>
+    <!-- 领域模型为 TMDB API 的一比一映射 POJO，getter/setter 无需逐个 Javadoc -->
+    <suppress checks="JavadocStyle" files="[\\/]model[\\/]"/>
+    <!-- 自动生成代码 -->
+    <suppress checks=".*" files="[\\/]generated-sources[\\/]"/>
+</suppressions>

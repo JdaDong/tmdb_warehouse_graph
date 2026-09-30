@@ -1,0 +1,75 @@
+{
+  "mappings": [
+    {
+      "name": "movie-details",
+      "priority": 5,
+      "request": {
+        "method": "GET",
+        "urlPathPattern": "/3/movie/(27205|155|157336|49026|1124|872585|603|604)"
+      },
+      "response": {
+        "status": 200,
+        "headers": {"Content-Type": "application/json;charset=utf-8", "Cache-Control": "public, max-age=300"},
+        "bodyFileName": "movie/{{request.pathSegments.[2]}}.json",
+        "transformers": ["response-template"]
+      },
+      "metadata": {"description": "电影详情；append_to_response 参数被忽略，夹具已内嵌 credits / keywords / release_dates"}
+    },
+    {
+      "name": "tv-details",
+      "priority": 5,
+      "request": {
+        "method": "GET",
+        "urlPathPattern": "/3/tv/(1399|66732)"
+      },
+      "response": {
+        "status": 200,
+        "headers": {"Content-Type": "application/json;charset=utf-8"},
+        "bodyFileName": "tv/{{request.pathSegments.[2]}}.json",
+        "transformers": ["response-template"]
+      }
+    },
+    {
+      "name": "person-details",
+      "priority": 5,
+      "request": {
+        "method": "GET",
+        "urlPathPattern": "/3/person/(525|6193|24045|2524|2037|3895|3894|1810|1813|83002|6968|3223|5081|6384|12052|530|2975|9340|9339|947|22970|1179419|239019|9813|228068|1223786|1920|1356210|1179422)"
+      },
+      "response": {
+        "status": 200,
+        "headers": {"Content-Type": "application/json;charset=utf-8"},
+        "bodyFileName": "person/{{request.pathSegments.[2]}}.json",
+        "transformers": ["response-template"]
+      }
+    },
+    {
+      "name": "company-details",
+      "priority": 5,
+      "request": {
+        "method": "GET",
+        "urlPathPattern": "/3/company/(923|9996|174|79|33|4|507|9195|13769|1885|3268|2575|76043|213)"
+      },
+      "response": {
+        "status": 200,
+        "headers": {"Content-Type": "application/json;charset=utf-8"},
+        "bodyFileName": "company/{{request.pathSegments.[2]}}.json",
+        "transformers": ["response-template"]
+      }
+    },
+    {
+      "name": "collection-details",
+      "priority": 5,
+      "request": {
+        "method": "GET",
+        "urlPathPattern": "/3/collection/(263|2344)"
+      },
+      "response": {
+        "status": 200,
+        "headers": {"Content-Type": "application/json;charset=utf-8"},
+        "bodyFileName": "collection/{{request.pathSegments.[2]}}.json",
+        "transformers": ["response-template"]
+      }
+    }
+  ]
+}

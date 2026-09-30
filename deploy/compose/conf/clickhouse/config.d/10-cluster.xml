@@ -1,0 +1,51 @@
+<?xml version="1.0"?>
+<!--
+  集群拓扑：本地为 1 分片 × 1 副本，但完整启用 Keeper + ReplicatedMergeTree + ON CLUSTER DDL，
+  与生产拓扑一致（生产只需在 remote_servers 中追加副本 / 分片并调整 macros）。
+-->
+<clickhouse>
+    <timezone>UTC</timezone>
+
+    <macros>
+        <cluster>tmdb_cluster</cluster>
+        <shard>01</shard>
+        <replica>ch01</replica>
+    </macros>
+
+    <zookeeper>
+        <node>
+            <host>clickhouse-keeper</host>
+            <port>9181</port>
+        </node>
+        <session_timeout_ms>30000</session_timeout_ms>
+        <operation_timeout_ms>10000</operation_timeout_ms>
+    </zookeeper>
+
+    <!--
+      ReplicatedMergeTree() 无参形式的默认路径。路径中包含 {uuid}，
+      使 CREATE TABLE ... AS 复制出的 _stg 表拥有独立的 Keeper 路径（离线分区替换依赖此约定）。
+    -->
+    <default_replica_path>/clickhouse/tables/{uuid}/{shard}</default_replica_path>
+    <default_replica_name>{replica}</default_replica_name>
+
+    <remote_servers>
+        <tmdb_cluster>
+            <!-- 集群内部互信：Distributed 查询使用共享密钥而非明文用户密码 -->
+            <secret from_env="CLICKHOUSE_CLUSTER_SECRET"/>
+            <shard>
+                <internal_replication>true</internal_replication>
+                <replica>
+                    <host>clickhouse</host>
+                    <port>9000</port>
+                </replica>
+            </shard>
+        </tmdb_cluster>
+    </remote_servers>
+
+    <distributed_ddl>
+        <path>/clickhouse/task_queue/ddl</path>
+        <cleanup_delay_period>60</cleanup_delay_period>
+        <task_max_lifetime>604800</task_max_lifetime>
+        <max_tasks_in_queue>1000</max_tasks_in_queue>
+    </distributed_ddl>
+</clickhouse>

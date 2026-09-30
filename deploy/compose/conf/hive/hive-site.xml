@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Hive Metastore 配置（仅作为 Iceberg HiveCatalog 的元数据服务，不运行 HiveServer2）。
+  数据库连接 URL / 用户 / 密码由启动脚本通过 hiveconf 注入（见 deploy/docker/hive-metastore/entrypoint.sh），
+  S3A 凭证来自容器环境变量 AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY。
+-->
+<configuration>
+  <property>
+    <name>javax.jdo.option.ConnectionDriverName</name>
+    <value>org.postgresql.Driver</value>
+  </property>
+  <property>
+    <name>hive.metastore.warehouse.dir</name>
+    <value>s3a://tmdb-lake/warehouse</value>
+  </property>
+  <property>
+    <name>hive.metastore.schema.verification</name>
+    <value>true</value>
+  </property>
+  <property>
+    <name>datanucleus.autoCreateSchema</name>
+    <value>false</value>
+  </property>
+  <!-- Iceberg 官方建议：允许类型提升（int→long、float→double）等 Schema 演进 -->
+  <property>
+    <name>hive.metastore.disallow.incompatible.col.type.changes</name>
+    <value>false</value>
+  </property>
+  <property>
+    <name>hive.metastore.event.db.notification.api.auth</name>
+    <value>false</value>
+  </property>
+  <property>
+    <name>hive.metastore.server.max.threads</name>
+    <value>200</value>
+  </property>
+
+  <!-- ===== S3A（MinIO） ===== -->
+  <property>
+    <name>fs.s3a.endpoint</name>
+    <value>http://minio:9000</value>
+  </property>
+  <property>
+    <name>fs.s3a.path.style.access</name>
+    <value>true</value>
+  </property>
+  <property>
+    <name>fs.s3a.connection.ssl.enabled</name>
+    <value>false</value>
+  </property>
+  <property>
+    <name>fs.s3a.impl</name>
+    <value>org.apache.hadoop.fs.s3a.S3AFileSystem</value>
+  </property>
+  <property>
+    <name>fs.s3a.aws.credentials.provider</name>
+    <value>com.amazonaws.auth.EnvironmentVariableCredentialsProvider</value>
+  </property>
+</configuration>

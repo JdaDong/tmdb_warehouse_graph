@@ -1,0 +1,133 @@
+# =============================================================================
+# 平台告警规则
+#
+# 批处理指标约定（由 tmdb-ingestion / tmdb-governance 推送到 Pushgateway，grouping key: job）：
+#   tmdb_job_last_success_timestamp_seconds   最近一次成功完成时间（gauge）
+#   tmdb_job_last_run_status                  最近一次运行状态，1=成功 0=失败（gauge）
+#   tmdb_http_requests_total{status}          TMDB API 请求数（counter，按 HTTP 状态码）
+#   tmdb_ingested_records_total{entity}       采集记录数（counter）
+#   tmdb_dq_failed_rules{severity}            质量检查失败规则数（gauge）
+# =============================================================================
+groups:
+  - name: tmdbwh-availability
+    rules:
+      - alert: ClickHouseDown
+        expr: up{job="clickhouse"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ClickHouse 不可用"
+          description: "{{ $labels.instance }} 已连续 2 分钟无法抓取指标。"
+
+      - alert: ClickHouseKeeperDown
+        expr: up{job="clickhouse-keeper"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ClickHouse Keeper 不可用，Replicated 表将变为只读"
+          description: "{{ $labels.instance }} 已连续 2 分钟无法抓取指标。"
+
+      - alert: FlinkNoRunningJobs
+        # 该指标仅在 JobManager 存活时存在，因此不会与 "Flink 未启动" 混淆
+        expr: flink_jobmanager_numRunningJobs == 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Flink 集群无运行中的作业，实时链路中断"
+          description: "JobManager 正常但 10 分钟内没有 RUNNING 状态的作业。"
+
+  - name: tmdbwh-olap
+    rules:
+      - alert: ClickHouseTooManyParts
+        expr: ClickHouseAsyncMetrics_MaxPartCountForPartition > 300
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ClickHouse 单分区 part 数过多（{{ $value }}）"
+          description: "写入批次过小或合并跟不上，超过 600 将拒绝写入。检查实时 Sink 批大小与后台合并。"
+
+      - alert: ClickHouseFailedQueriesHigh
+        expr: rate(ClickHouseProfileEvents_FailedQuery[5m]) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ClickHouse 失败查询速率偏高（{{ $value | humanize }}/s）"
+          description: "结合 governance 成本报表与 system.query_log 定位失败查询。"
+
+      - alert: ClickHouseReadonlyReplica
+        expr: ClickHouseMetrics_ReadonlyReplica > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ClickHouse 存在只读副本"
+          description: "通常由 Keeper 会话丢失导致，Replicated 表无法写入。"
+
+  - name: tmdbwh-realtime
+    rules:
+      - alert: FlinkJobRestarting
+        expr: increase(flink_jobmanager_job_numRestarts[10m]) > 3
+        labels:
+          severity: warning
+        annotations:
+          summary: "Flink 作业 {{ $labels.job_name }} 10 分钟内重启超过 3 次"
+          description: "检查 TaskManager 日志与死信队列 tmdb.dlq。"
+
+      - alert: FlinkCheckpointFailing
+        expr: increase(flink_jobmanager_job_numberOfFailedCheckpoints[15m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Flink 作业 {{ $labels.job_name }} checkpoint 失败"
+          description: "checkpoint 持续失败会导致故障恢复时重放大量数据。检查 MinIO 可用性与状态大小。"
+
+      - alert: KafkaConsumerLagHigh
+        expr: sum by (consumergroup, topic) (kafka_consumergroup_lag) > 10000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "消费组 {{ $labels.consumergroup }} 在 {{ $labels.topic }} 上积压 {{ $value }} 条"
+          description: "实时作业处理能力不足或已停止，考虑扩大并行度。"
+
+  - name: tmdbwh-batch
+    rules:
+      - alert: IngestionStale
+        expr: time() - tmdb_job_last_success_timestamp_seconds{job=~"tmdb_ingestion_.*"} > 2 * 3600
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "采集作业 {{ $labels.job }} 超过 2 小时未成功运行"
+          description: "检查 Airflow 调度与 TMDB 凭证 / 限流情况。"
+
+      - alert: BatchJobFailed
+        expr: tmdb_job_last_run_status == 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "批处理作业 {{ $labels.job }} 最近一次运行失败"
+          description: "查看 Airflow 任务日志。"
+
+      - alert: TmdbRateLimitedRatioHigh
+        expr: |
+          sum by (job) (tmdb_http_requests_total{status="429"})
+            / clamp_min(sum by (job) (tmdb_http_requests_total), 1) > 0.05
+        labels:
+          severity: info
+        annotations:
+          summary: "采集作业 {{ $labels.job }} 被 TMDB 限流比例超过 5%"
+          description: "适当调低 TMDB_RATE_LIMIT / TMDB_MAX_CONCURRENCY。"
+
+      - alert: DataQualityBlockerFailed
+        expr: tmdb_dq_failed_rules{severity="BLOCKER"} > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "存在 {{ $value }} 条 BLOCKER 级数据质量规则未通过，下游已被阻断"
+          description: "查询 governance.dq_result 定位失败规则与样例数据。"

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  采集进程日志配置。
+  - 默认输出到控制台，MDC 中的 job / layer / dt / traceId / entity 会一并打印，便于按作业检索；
+  - 设置环境变量 TMDB_LOG_JSON=true 时切换为 JSON 输出（对接日志采集）。
+-->
+<configuration>
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{40} [%X{job}] [%X{dt}] - %msg%n</pattern>
+        </encoder>
+    </appender>
+    <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <includeMdcKeyName>job</includeMdcKeyName>
+            <includeMdcKeyName>layer</includeMdcKeyName>
+            <includeMdcKeyName>dt</includeMdcKeyName>
+            <includeMdcKeyName>traceId</includeMdcKeyName>
+            <includeMdcKeyName>entity</includeMdcKeyName>
+        </encoder>
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="${TMDB_LOG_JSON:-CONSOLE}"/>
+    </root>
+    <logger name="com.tmdbwh" level="INFO"/>
+    <!-- OkHttp 与 AWS SDK 请求级日志较噪，单独降级 -->
+    <logger name="okhttp3" level="WARN"/>
+    <logger name="software.amazon.awssdk" level="WARN"/>
+</configuration>

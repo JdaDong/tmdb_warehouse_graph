@@ -1,0 +1,36 @@
+{
+  "adult": false,
+  "created_by": [
+    {"id": 9813, "credit_id": "5256c8c219c2956ff604858a", "name": "David Benioff", "gender": 2},
+    {"id": 228068, "credit_id": "552e611e9251413fea000901", "name": "D. B. Weiss", "gender": 2}
+  ],
+  "episode_run_time": [],
+  "first_air_date": "2011-04-17",
+  "genres": [
+    {"id": 10765, "name": "Sci-Fi & Fantasy"},
+    {"id": 18, "name": "Drama"}
+  ],
+  "id": 1399,
+  "in_production": false,
+  "last_air_date": "2019-05-19",
+  "name": "Game of Thrones",
+  "networks": [
+    {"id": 49, "logo_path": "/tuomPhY2UtuPTqqFnKMVHvSb724.png", "name": "HBO", "origin_country": "US"}
+  ],
+  "number_of_episodes": 73,
+  "number_of_seasons": 8,
+  "origin_country": ["US"],
+  "original_language": "en",
+  "original_name": "Game of Thrones",
+  "popularity": 346.098,
+  "status": "Ended",
+  "type": "Scripted",
+  "vote_average": 8.456,
+  "vote_count": 23712,
+  "keywords": {
+    "results": [
+      {"id": 818, "name": "based on novel or book"},
+      {"id": 4152, "name": "kingdom"}
+    ]
+  }
+}

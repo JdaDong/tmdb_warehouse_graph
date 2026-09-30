@@ -1,0 +1,4 @@
+# Airflow 额外依赖（版本受官方 constraints 文件约束，保证与 Airflow 2.9.2 兼容）
+apache-airflow-providers-http
+apache-airflow-providers-cncf-kubernetes
+clickhouse-connect

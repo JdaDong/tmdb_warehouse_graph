@@ -1,0 +1,13 @@
+# Grafana 大盘自动加载：目录下所有 JSON 以只读方式导入到 "TMDB Warehouse" 文件夹
+apiVersion: 1
+
+providers:
+  - name: tmdbwh
+    folder: TMDB Warehouse
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 60
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

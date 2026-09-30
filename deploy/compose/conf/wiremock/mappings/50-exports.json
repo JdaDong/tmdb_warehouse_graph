@@ -1,0 +1,37 @@
+{
+  "mappings": [
+    {
+      "name": "export-movie-ids",
+      "priority": 2,
+      "request": {"method": "GET", "urlPathPattern": "/p/exports/movie_ids_[0-9]{2}_[0-9]{2}_[0-9]{4}\\.json\\.gz"},
+      "response": {"status": 200, "headers": {"Content-Type": "application/octet-stream"}, "bodyFileName": "exports/movie_ids.ndjson"},
+      "metadata": {
+        "description": "每日 ID 导出。真实 TMDB 返回 gzip 压缩的 NDJSON；Mock 返回未压缩 NDJSON（仓库中不存放二进制文件）。采集端 DailyIdExportReader 按 gzip 魔数（0x1f8b）自动识别两种格式。"
+      }
+    },
+    {
+      "name": "export-tv-ids",
+      "priority": 2,
+      "request": {"method": "GET", "urlPathPattern": "/p/exports/tv_series_ids_[0-9]{2}_[0-9]{2}_[0-9]{4}\\.json\\.gz"},
+      "response": {"status": 200, "headers": {"Content-Type": "application/octet-stream"}, "bodyFileName": "exports/tv_series_ids.ndjson"}
+    },
+    {
+      "name": "export-person-ids",
+      "priority": 2,
+      "request": {"method": "GET", "urlPathPattern": "/p/exports/person_ids_[0-9]{2}_[0-9]{2}_[0-9]{4}\\.json\\.gz"},
+      "response": {"status": 200, "headers": {"Content-Type": "application/octet-stream"}, "bodyFileName": "exports/person_ids.ndjson"}
+    },
+    {
+      "name": "export-company-ids",
+      "priority": 2,
+      "request": {"method": "GET", "urlPathPattern": "/p/exports/production_company_ids_[0-9]{2}_[0-9]{2}_[0-9]{4}\\.json\\.gz"},
+      "response": {"status": 200, "headers": {"Content-Type": "application/octet-stream"}, "bodyFileName": "exports/production_company_ids.ndjson"}
+    },
+    {
+      "name": "export-collection-ids",
+      "priority": 2,
+      "request": {"method": "GET", "urlPathPattern": "/p/exports/collection_ids_[0-9]{2}_[0-9]{2}_[0-9]{4}\\.json\\.gz"},
+      "response": {"status": 200, "headers": {"Content-Type": "application/octet-stream"}, "bodyFileName": "exports/collection_ids.ndjson"}
+    }
+  ]
+}

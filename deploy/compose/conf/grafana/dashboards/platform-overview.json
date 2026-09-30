@@ -1,0 +1,167 @@
+{
+  "uid": "tmdbwh-platform-overview",
+  "title": "TMDB 平台总览",
+  "description": "组件可用性、ClickHouse、Flink、Kafka 与批处理作业健康度",
+  "tags": ["tmdbwh", "platform"],
+  "timezone": "browser",
+  "editable": false,
+  "graphTooltip": 1,
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "version": 1,
+  "time": {"from": "now-6h", "to": "now"},
+  "templating": {"list": []},
+  "annotations": {"list": []},
+  "panels": [
+    {
+      "type": "row", "title": "组件可用性", "id": 100, "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0}
+    },
+    {
+      "type": "stat", "title": "组件状态", "id": 1,
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 4, "w": 24, "x": 0, "y": 1},
+      "targets": [
+        {"refId": "A", "expr": "max by (job) (up{job=~\"clickhouse|clickhouse-keeper|flink|kafka|minio|pushgateway\"})", "legendFormat": "{{job}}"}
+      ],
+      "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "center", "textMode": "value_and_name",
+                  "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [{"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}}],
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row", "title": "ClickHouse（OLAP）", "id": 101, "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5}
+    },
+    {
+      "type": "timeseries", "title": "查询速率（QPS）", "id": 2,
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 6},
+      "targets": [
+        {"refId": "A", "expr": "rate(ClickHouseProfileEvents_SelectQuery[1m])", "legendFormat": "SELECT"},
+        {"refId": "B", "expr": "rate(ClickHouseProfileEvents_InsertQuery[1m])", "legendFormat": "INSERT"},
+        {"refId": "C", "expr": "rate(ClickHouseProfileEvents_FailedQuery[1m])", "legendFormat": "FAILED"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []}
+    },
+    {
+      "type": "timeseries", "title": "写入行数 / 秒", "id": 3,
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 6},
+      "targets": [
+        {"refId": "A", "expr": "rate(ClickHouseProfileEvents_InsertedRows[1m])", "legendFormat": "inserted rows"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "rowsps"}, "overrides": []}
+    },
+    {
+      "type": "timeseries", "title": "单分区最大 Part 数", "id": 4,
+      "description": "超过 300 延迟写入，超过 600 拒绝写入",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 6},
+      "targets": [
+        {"refId": "A", "expr": "ClickHouseAsyncMetrics_MaxPartCountForPartition", "legendFormat": "max parts"}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 300}, {"color": "red", "value": 600}]},
+          "custom": {"thresholdsStyle": {"mode": "line"}}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries", "title": "服务端内存", "id": 5,
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 14},
+      "targets": [
+        {"refId": "A", "expr": "ClickHouseMetrics_MemoryTracking", "legendFormat": "tracked memory"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "bytes"}, "overrides": []}
+    },
+    {
+      "type": "timeseries", "title": "后台合并 / 数据迁移", "id": 6,
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 14},
+      "targets": [
+        {"refId": "A", "expr": "ClickHouseMetrics_Merge", "legendFormat": "running merges"},
+        {"refId": "B", "expr": "ClickHouseMetrics_PartMutation", "legendFormat": "running mutations"},
+        {"refId": "C", "expr": "ClickHouseMetrics_BackgroundMovePoolTask", "legendFormat": "moves (hot→cold)"}
+      ],
+      "fieldConfig": {"defaults": {}, "overrides": []}
+    },
+    {
+      "type": "row", "title": "实时链路（Flink / Kafka）", "id": 102, "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 22}
+    },
+    {
+      "type": "stat", "title": "运行中作业数", "id": 7,
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 4, "x": 0, "y": 23},
+      "targets": [{"refId": "A", "expr": "flink_jobmanager_numRunningJobs", "legendFormat": "running"}],
+      "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []}
+    },
+    {
+      "type": "timeseries", "title": "Checkpoint 耗时 / 重启次数", "id": 8,
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 10, "x": 4, "y": 23},
+      "targets": [
+        {"refId": "A", "expr": "flink_jobmanager_job_lastCheckpointDuration", "legendFormat": "{{job_name}} checkpoint(ms)"},
+        {"refId": "B", "expr": "flink_jobmanager_job_numRestarts", "legendFormat": "{{job_name}} restarts"}
+      ],
+      "fieldConfig": {"defaults": {}, "overrides": []}
+    },
+    {
+      "type": "timeseries", "title": "消费组积压（Lag）", "id": 9,
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 10, "x": 14, "y": 23},
+      "targets": [
+        {"refId": "A", "expr": "sum by (consumergroup, topic) (kafka_consumergroup_lag)", "legendFormat": "{{consumergroup}} / {{topic}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
+    },
+    {
+      "type": "timeseries", "title": "Topic 写入速率（条 / 秒）", "id": 10,
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 31},
+      "targets": [
+        {"refId": "A", "expr": "sum by (topic) (rate(kafka_topic_partition_current_offset{topic=~\"tmdb\\\\..*\"}[5m]))", "legendFormat": "{{topic}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
+    },
+    {
+      "type": "row", "title": "批处理作业（采集 / 离线 / 治理）", "id": 103, "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 39}
+    },
+    {
+      "type": "stat", "title": "距上次成功运行", "id": 11,
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 40},
+      "targets": [
+        {"refId": "A", "expr": "time() - tmdb_job_last_success_timestamp_seconds", "legendFormat": "{{job}}"}
+      ],
+      "options": {"colorMode": "background", "graphMode": "none", "textMode": "value_and_name", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 7200}, {"color": "red", "value": 90000}]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries", "title": "TMDB 请求（按状态码）", "id": 12,
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 40},
+      "targets": [
+        {"refId": "A", "expr": "sum by (job, status) (tmdb_http_requests_total)", "legendFormat": "{{job}} {{status}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
+    }
+  ]
+}

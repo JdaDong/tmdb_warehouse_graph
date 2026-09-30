@@ -1,0 +1,28 @@
+{
+  "mappings": [
+    {
+      "name": "genre-movie-list",
+      "priority": 2,
+      "request": {"method": "GET", "urlPath": "/3/genre/movie/list"},
+      "response": {"status": 200, "headers": {"Content-Type": "application/json;charset=utf-8"}, "bodyFileName": "reference/genre_movie.json"}
+    },
+    {
+      "name": "genre-tv-list",
+      "priority": 2,
+      "request": {"method": "GET", "urlPath": "/3/genre/tv/list"},
+      "response": {"status": 200, "headers": {"Content-Type": "application/json;charset=utf-8"}, "bodyFileName": "reference/genre_tv.json"}
+    },
+    {
+      "name": "configuration-countries",
+      "priority": 2,
+      "request": {"method": "GET", "urlPath": "/3/configuration/countries"},
+      "response": {"status": 200, "headers": {"Content-Type": "application/json;charset=utf-8"}, "bodyFileName": "reference/countries.json"}
+    },
+    {
+      "name": "configuration-languages",
+      "priority": 2,
+      "request": {"method": "GET", "urlPath": "/3/configuration/languages"},
+      "response": {"status": 200, "headers": {"Content-Type": "application/json;charset=utf-8"}, "bodyFileName": "reference/languages.json"}
+    }
+  ]
+}

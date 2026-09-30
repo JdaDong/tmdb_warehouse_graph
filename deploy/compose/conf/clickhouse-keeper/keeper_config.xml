@@ -1,0 +1,44 @@
+<?xml version="1.0"?>
+<!--
+  ClickHouse Keeper（替代 ZooKeeper）：单节点 Raft。
+  生产环境为 3 节点（见 Helm values-prod.yaml），raft_configuration 中列出全部成员即可。
+-->
+<clickhouse>
+    <logger>
+        <level>information</level>
+        <console>1</console>
+    </logger>
+    <listen_host>0.0.0.0</listen_host>
+
+    <keeper_server>
+        <tcp_port>9181</tcp_port>
+        <server_id>1</server_id>
+        <log_storage_path>/var/lib/clickhouse/coordination/log</log_storage_path>
+        <snapshot_storage_path>/var/lib/clickhouse/coordination/snapshots</snapshot_storage_path>
+
+        <coordination_settings>
+            <operation_timeout_ms>10000</operation_timeout_ms>
+            <session_timeout_ms>30000</session_timeout_ms>
+            <raft_logs_level>warning</raft_logs_level>
+            <snapshot_distance>100000</snapshot_distance>
+        </coordination_settings>
+
+        <four_letter_word_white_list>conf,cons,crst,envi,ruok,srst,srvr,stat,wchs,dirs,mntr,isro</four_letter_word_white_list>
+
+        <raft_configuration>
+            <server>
+                <id>1</id>
+                <hostname>clickhouse-keeper</hostname>
+                <port>9234</port>
+            </server>
+        </raft_configuration>
+    </keeper_server>
+
+    <prometheus>
+        <endpoint>/metrics</endpoint>
+        <port>9363</port>
+        <metrics>true</metrics>
+        <events>true</events>
+        <asynchronous_metrics>true</asynchronous_metrics>
+    </prometheus>
+</clickhouse>

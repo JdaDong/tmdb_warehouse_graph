@@ -1,0 +1,42 @@
+# ===== Build =====
+target/
+*.class
+*.jar
+!**/src/test/resources/**/*.jar
+dependency-reduced-pom.xml
+
+# ===== IDE =====
+.idea/
+*.iml
+.vscode/
+.metals/
+.bloop/
+.classpath
+.project
+.settings/
+*.swp
+.DS_Store
+
+# ===== Secrets / local env =====
+.env
+*.local.conf
+secrets/
+
+# ===== Python (Airflow) =====
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# ===== Runtime data =====
+deploy/compose/data/
+logs/
+*.log
+
+# ===== Helm =====
+deploy/helm/**/charts/*.tgz
+
+# dist 为构建产物目录，仅保留 .gitkeep 与 .gitignore
+dist/*
+!dist/.gitignore
+!dist/jars/

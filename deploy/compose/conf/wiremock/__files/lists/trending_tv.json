@@ -1,0 +1,9 @@
+{
+  "page": 1,
+  "results": [
+    {"id": 1399, "media_type": "tv", "name": "Game of Thrones", "original_name": "Game of Thrones", "original_language": "en", "origin_country": ["US"], "first_air_date": "2011-04-17", "genre_ids": [10765, 18], "adult": false, "overview": "Seven noble families fight for control of the mythical land of Westeros.", "popularity": {{{randomInt lower=34000 upper=35200}}}, "vote_count": {{{randomInt lower=23600 upper=23900}}}, "vote_average": 8.456, "backdrop_path": "/gX8SYlnL9ZznfZwEH4KJUePBFUM.jpg", "poster_path": "/gwPSoYUHAKmdyVywgL3KKUmkjsh.jpg"},
+    {"id": 66732, "media_type": "tv", "name": "Stranger Things", "original_name": "Stranger Things", "original_language": "en", "origin_country": ["US"], "first_air_date": "2016-07-15", "genre_ids": [18, 10765], "adult": false, "overview": "When a young boy vanishes, a small town uncovers a mystery.", "popularity": {{{randomInt lower=28000 upper=30000}}}, "vote_count": {{{randomInt lower=15100 upper=15400}}}, "vote_average": 8.6, "backdrop_path": "/56v2KjBlU4XaOv9rVYEQypROD7P.jpg", "poster_path": "/49WJfeN0moxb9IPfGn8AIqMGskD.jpg"}
+  ],
+  "total_pages": 1,
+  "total_results": 2
+}

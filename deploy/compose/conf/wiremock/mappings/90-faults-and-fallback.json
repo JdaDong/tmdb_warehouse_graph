@@ -1,0 +1,43 @@
+{
+  "mappings": [
+    {
+      "name": "fault-rate-limit-157336",
+      "priority": 1,
+      "scenarioName": "rate-limit-157336",
+      "requiredScenarioState": "Started",
+      "newScenarioState": "Recovered",
+      "request": {"method": "GET", "urlPath": "/3/movie/157336"},
+      "response": {
+        "status": 429,
+        "headers": {"Content-Type": "application/json;charset=utf-8", "Retry-After": "1"},
+        "bodyFileName": "errors/rate_limited.json"
+      },
+      "metadata": {"description": "首次请求返回 429 + Retry-After，之后恢复正常；用于验证客户端遵守 Retry-After。重置: POST /__admin/scenarios/reset"}
+    },
+    {
+      "name": "fault-unavailable-1124",
+      "priority": 1,
+      "scenarioName": "flaky-1124",
+      "requiredScenarioState": "Started",
+      "newScenarioState": "Recovered",
+      "request": {"method": "GET", "urlPath": "/3/movie/1124"},
+      "response": {
+        "status": 503,
+        "headers": {"Content-Type": "application/json;charset=utf-8"},
+        "bodyFileName": "errors/service_unavailable.json"
+      },
+      "metadata": {"description": "首次请求返回 503，之后恢复正常；用于验证 5xx 指数退避重试"}
+    },
+    {
+      "name": "fallback-not-found",
+      "priority": 10,
+      "request": {"method": "ANY", "urlPathPattern": "/3/.*"},
+      "response": {
+        "status": 404,
+        "headers": {"Content-Type": "application/json;charset=utf-8"},
+        "bodyFileName": "errors/not_found.json"
+      },
+      "metadata": {"description": "与真实 TMDB 一致的 404 报文（status_code=34），例如导出文件中已删除的 ID"}
+    }
+  ]
+}

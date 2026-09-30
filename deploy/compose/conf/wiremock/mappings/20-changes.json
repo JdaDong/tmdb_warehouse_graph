@@ -1,0 +1,49 @@
+{
+  "mappings": [
+    {
+      "name": "movie-changes-page-2",
+      "priority": 1,
+      "request": {
+        "method": "GET",
+        "urlPath": "/3/movie/changes",
+        "queryParameters": {"page": {"equalTo": "2"}}
+      },
+      "response": {
+        "status": 200,
+        "headers": {"Content-Type": "application/json;charset=utf-8"},
+        "bodyFileName": "changes/movie_page2.json"
+      },
+      "metadata": {"description": "第 2 页包含一个已删除（详情 404）的电影 ID，用于验证增量采集的容错"}
+    },
+    {
+      "name": "movie-changes-page-1",
+      "priority": 2,
+      "request": {"method": "GET", "urlPath": "/3/movie/changes"},
+      "response": {
+        "status": 200,
+        "headers": {"Content-Type": "application/json;charset=utf-8"},
+        "bodyFileName": "changes/movie_page1.json"
+      }
+    },
+    {
+      "name": "tv-changes",
+      "priority": 2,
+      "request": {"method": "GET", "urlPath": "/3/tv/changes"},
+      "response": {
+        "status": 200,
+        "headers": {"Content-Type": "application/json;charset=utf-8"},
+        "bodyFileName": "changes/tv_page1.json"
+      }
+    },
+    {
+      "name": "person-changes",
+      "priority": 2,
+      "request": {"method": "GET", "urlPath": "/3/person/changes"},
+      "response": {
+        "status": 200,
+        "headers": {"Content-Type": "application/json;charset=utf-8"},
+        "bodyFileName": "changes/person_page1.json"
+      }
+    }
+  ]
+}

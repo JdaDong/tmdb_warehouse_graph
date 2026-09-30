@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 单元测试日志：控制台纯文本，降低第三方库噪音 -->
+<configuration>
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} %-5level [%thread] %logger{36} [%X{job}] - %msg%n</pattern>
+        </encoder>
+    </appender>
+    <logger name="com.tmdbwh" level="DEBUG"/>
+    <logger name="org.testcontainers" level="INFO"/>
+    <logger name="software.amazon.awssdk" level="WARN"/>
+    <logger name="com.zaxxer.hikari" level="WARN"/>
+    <root level="WARN">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+</configuration>

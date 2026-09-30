@@ -1,0 +1,22 @@
+{
+  "Rules": [
+    {
+      "Expiration": {"Days": 30},
+      "ID": "expire-quarantine-30d",
+      "Status": "Enabled",
+      "Filter": {"Prefix": "quarantine/"}
+    },
+    {
+      "Expiration": {"Days": 14},
+      "ID": "expire-spark-events-14d",
+      "Status": "Enabled",
+      "Filter": {"Prefix": "spark-events/"}
+    },
+    {
+      "Expiration": {"Days": 7},
+      "ID": "expire-flink-checkpoints-orphan-7d",
+      "Status": "Enabled",
+      "Filter": {"Prefix": "checkpoints/_orphan/"}
+    }
+  ]
+}

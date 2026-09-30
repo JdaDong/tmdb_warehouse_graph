@@ -1,0 +1,10 @@
+{
+  "results": [
+    {"id": 27205, "adult": false},
+    {"id": 155, "adult": false},
+    {"id": 999999901, "adult": null}
+  ],
+  "page": 1,
+  "total_pages": 3,
+  "total_results": 7
+}

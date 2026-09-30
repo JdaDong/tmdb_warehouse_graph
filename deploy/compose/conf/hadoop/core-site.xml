@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Hadoop 客户端配置（Flink 容器通过 HADOOP_CONF_DIR 加载，供 Iceberg HadoopFileIO 使用 s3a://）。
+  凭证不写入文件：使用 EnvironmentVariableCredentialsProvider 读取容器环境变量
+  AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY（由 docker-compose 从 .env 注入）。
+-->
+<configuration>
+  <property>
+    <name>fs.s3a.endpoint</name>
+    <value>http://minio:9000</value>
+  </property>
+  <property>
+    <name>fs.s3a.path.style.access</name>
+    <value>true</value>
+  </property>
+  <property>
+    <name>fs.s3a.connection.ssl.enabled</name>
+    <value>false</value>
+  </property>
+  <property>
+    <name>fs.s3a.impl</name>
+    <value>org.apache.hadoop.fs.s3a.S3AFileSystem</value>
+  </property>
+  <property>
+    <name>fs.s3a.aws.credentials.provider</name>
+    <value>com.amazonaws.auth.EnvironmentVariableCredentialsProvider</value>
+  </property>
+  <property>
+    <name>fs.s3a.fast.upload</name>
+    <value>true</value>
+  </property>
+  <property>
+    <name>fs.s3a.connection.maximum</name>
+    <value>64</value>
+  </property>
+  <property>
+    <name>fs.s3a.attempts.maximum</name>
+    <value>10</value>
+  </property>
+</configuration>

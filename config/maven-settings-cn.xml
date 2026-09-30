@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  可选的 Maven 镜像配置：在无法直连 Maven Central 的网络环境（如国内办公网 / CI）下使用。
+  用法：
+    mvn -s config/maven-settings-cn.xml verify
+    make build MVN_MIRROR=cn
+  本文件只替换远程仓库地址，不改变本地仓库位置（仍为 ~/.m2/repository）。
+-->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.2.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.2.0 https://maven.apache.org/xsd/settings-1.2.0.xsd">
+    <mirrors>
+        <mirror>
+            <id>aliyun-public</id>
+            <name>Aliyun Maven Mirror</name>
+            <url>https://maven.aliyun.com/repository/public</url>
+            <mirrorOf>central</mirrorOf>
+        </mirror>
+    </mirrors>
+</settings>

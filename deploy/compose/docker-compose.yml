@@ -1,0 +1,835 @@
+# =============================================================================
+# TMDB Warehouse & Graph Platform - 本地一体化环境（Docker Compose v2）
+#
+#   make up-minimal   核心 + OLAP + 图库 + 计算 + Mock（推荐起步）
+#   make up           追加调度 + 监控
+#   make up PROFILES=core,olap,graph,compute,mock,orchestration,monitoring,governance
+#   make ps / make logs / make down / make purge
+#
+# 说明：
+#   - 无 profile 的服务为核心基础设施，始终启动；
+#   - 密钥全部来自 .env（make env-init 生成），不写入本文件；
+#   - healthcheck 尽量使用 bash /dev/tcp，避免依赖镜像是否内置 curl；
+#     使用 curl 的少数服务（clickhouse / airflow / grafana / prometheus）官方镜像确定内置。
+# =============================================================================
+
+x-common-env: &common-env
+  TMDBWH_ENV: ${TMDBWH_ENV:-local}
+  TMDB_BASE_URL: ${TMDB_BASE_URL}
+  TMDB_EXPORT_BASE_URL: ${TMDB_EXPORT_BASE_URL}
+  TMDB_BEARER_TOKEN: ${TMDB_BEARER_TOKEN}
+  TMDB_API_KEY: ${TMDB_API_KEY}
+  TMDB_MOCK_MODE: ${TMDB_MOCK_MODE}
+  TMDB_LANGUAGE: ${TMDB_LANGUAGE:-en-US}
+  TMDB_RATE_LIMIT: ${TMDB_RATE_LIMIT:-20}
+  TMDB_MAX_CONCURRENCY: ${TMDB_MAX_CONCURRENCY:-8}
+  TMDBWH_BUSINESS_ZONE: ${TMDBWH_BUSINESS_ZONE:-UTC}
+  S3_ENDPOINT: ${S3_ENDPOINT}
+  S3_REGION: ${S3_REGION:-us-east-1}
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+  S3_SECRET_KEY: ${S3_SECRET_KEY}
+  S3_BUCKET: ${S3_BUCKET}
+  AWS_REGION: ${S3_REGION:-us-east-1}
+  AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY}
+  AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
+  KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+  CLICKHOUSE_URL: ${CLICKHOUSE_URL}
+  CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+  CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+  CLICKHOUSE_CLUSTER: ${CLICKHOUSE_CLUSTER}
+  NEO4J_URI: ${NEO4J_URI}
+  NEO4J_USER: ${NEO4J_USER}
+  NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+  NEO4J_DATABASE: ${NEO4J_DATABASE:-neo4j}
+  HIVE_METASTORE_URI: ${HIVE_METASTORE_URI}
+  ICEBERG_WAREHOUSE: ${ICEBERG_WAREHOUSE}
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+services:
+# ===========================================================================
+# 核心基础设施（默认启动）
+# ===========================================================================
+  minio:
+    # MinIO 官方已停止发布社区版镜像（Docker Hub 的 minio/minio 已下线，quay.io 需登录才能拉取）。
+    # 这里使用功能与数据布局相同的冻结版本镜像，可通过 MINIO_IMAGE 环境变量替换为你自己的来源。
+    image: ${MINIO_IMAGE:-bitnamilegacy/minio:2024.5.10}
+    container_name: tmdbwh-minio
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:9000:9000" # S3 API（Spark / Flink / ClickHouse / 采集）
+      - "${BIND_ADDRESS:-127.0.0.1}:9001:9001" # Console
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY}
+      MINIO_DEFAULT_BUCKETS: "${S3_BUCKET},${CLICKHOUSE_COLD_BUCKET}"
+      MINIO_PROMETHEUS_AUTH_TYPE: public
+    volumes:
+      - minio-data:/data
+    command: ["server", "/data", "--console-address", ":9001"]
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/9000 && printf \"GET /minio/health/live HTTP/1.0\\r\\n\\r\\n\" >&3 && head -1 <&3 | grep -q 200'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: {memory: 2g}
+
+  minio-init:
+    image: ${MC_IMAGE:-bitnamilegacy/minio-client:2024.5.9}
+    container_name: tmdbwh-minio-init
+    entrypoint: ["bash", "/scripts/init-minio.sh"]
+    environment:
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_BUCKET: ${S3_BUCKET}
+      CLICKHOUSE_COLD_BUCKET: ${CLICKHOUSE_COLD_BUCKET}
+      S3_APP_ACCESS_KEY: ${S3_APP_ACCESS_KEY}
+      S3_APP_SECRET_KEY: ${S3_APP_SECRET_KEY}
+    volumes:
+      - ../../scripts/init:/scripts:ro
+      - ./conf/minio:/conf:ro
+    depends_on:
+      minio: {condition: service_healthy}
+    restart: "no"
+    logging: *default-logging
+
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: tmdbwh-kafka
+    # KRaft 单节点：9092 供容器内访问（listener 名 INTERNAL），9095 供宿主机访问（EXTERNAL，advertised 为 localhost:9095）
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:9095:9095"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:9095
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:9095
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_RETENTION_HOURS: 72
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 20s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: {memory: 2g}
+
+  kafka-init:
+    image: apache/kafka:3.7.0
+    container_name: tmdbwh-kafka-init
+    entrypoint: ["sh", "/scripts/init-kafka-topics.sh"]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    volumes:
+      - ../../scripts/init:/scripts:ro
+    depends_on:
+      kafka: {condition: service_healthy}
+    restart: "no"
+    logging: *default-logging
+
+  postgres:
+    image: postgres:15.7-alpine
+    container_name: tmdbwh-postgres
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      HMS_DB_PASSWORD: ${HMS_DB_PASSWORD}
+      AIRFLOW_DB_PASSWORD: ${AIRFLOW_DB_PASSWORD}
+      OM_DB_PASSWORD: ${OM_DB_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./conf/postgres/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: {memory: 1g}
+
+  hive-metastore:
+    build:
+      context: ../docker/hive-metastore
+      args:
+        MAVEN_REPO: ${MAVEN_REPO:-https://repo1.maven.org/maven2}
+    image: tmdbwh/hive-metastore:3.1.3
+    container_name: tmdbwh-hive-metastore
+    # 官方 apache/hive:3.1.3 镜像仅提供 amd64 构建，Apple Silicon 需显式指定平台以使用模拟运行
+    platform: ${HMS_PLATFORM:-}
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:9083:9083"
+    environment:
+      <<: *common-env
+      HMS_DB_URL: jdbc:postgresql://postgres:5432/metastore
+      HMS_DB_USER: hive
+      HMS_DB_PASSWORD: ${HMS_DB_PASSWORD}
+      HMS_HEAP_MB: 1024
+    volumes:
+      - ./conf/hive/hive-site.xml:/opt/hive/conf/hive-site.xml:ro
+    depends_on:
+      postgres: {condition: service_healthy}
+      minio-init: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/9083'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: {memory: 2g}
+
+  # ===========================================================================
+  # 计算（compute）
+  # ===========================================================================
+  spark-master:
+    image: tmdbwh/spark:3.5.1
+    build:
+      context: ../docker/spark
+      args:
+        MAVEN_REPO: ${MAVEN_REPO:-https://repo1.maven.org/maven2}
+    container_name: tmdbwh-spark-master
+    profiles: ["compute"]
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:7077:7077"
+      - "${BIND_ADDRESS:-127.0.0.1}:8085:8085"
+      - "${BIND_ADDRESS:-127.0.0.1}:6066:6066"
+    environment:
+      <<: *common-env
+      SPARK_MASTER_OPTS: "-Dspark.deploy.rest.enabled=true -Dspark.master.rest.host=0.0.0.0 -Dspark.master.rest.port=6066"
+    volumes:
+      - ./conf/spark/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+      - ../../dist:/opt/tmdbwh/dist:ro
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master",
+              "--host", "spark-master", "--port", "7077", "--webui-port", "8085"]
+    depends_on:
+      hive-metastore: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8085'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: {memory: 3g}
+
+  spark-worker:
+    image: tmdbwh/spark:3.5.1
+    container_name: tmdbwh-spark-worker
+    profiles: ["compute"]
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:8086:8086"
+    environment:
+      <<: *common-env
+      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-4}
+      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-4g}
+    volumes:
+      - ./conf/spark/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+      - ../../dist:/opt/tmdbwh/dist:ro
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker",
+              "spark://spark-master:7077", "--webui-port", "8086"]
+    depends_on:
+      spark-master: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8086'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: {memory: 6g}
+
+  spark-history:
+    image: tmdbwh/spark:3.5.1
+    container_name: tmdbwh-spark-history
+    profiles: ["compute"]
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:18080:18080"
+    environment:
+      <<: *common-env
+    volumes:
+      - ./conf/spark/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.history.HistoryServer"]
+    depends_on:
+      minio-init: {condition: service_completed_successfully}
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: {memory: 1g}
+
+  flink-jobmanager:
+    image: tmdbwh/flink:1.18.1
+    build:
+      context: ../docker/flink
+      args:
+        MAVEN_REPO: ${MAVEN_REPO:-https://repo1.maven.org/maven2}
+    container_name: tmdbwh-flink-jobmanager
+    profiles: ["compute"]
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:8081:8081"
+    environment:
+      <<: *common-env
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        jobmanager.rpc.port: 6123
+        jobmanager.memory.process.size: 1600m
+        taskmanager.memory.process.size: 4096m
+        taskmanager.numberOfTaskSlots: 4
+        parallelism.default: 2
+        state.backend.type: rocksdb
+        state.backend.incremental: true
+        state.checkpoints.dir: s3://tmdb-lake/checkpoints/entity-change
+        state.savepoints.dir: s3://tmdb-lake/savepoints
+        execution.checkpointing.mode: EXACTLY_ONCE
+        execution.checkpointing.min-pause: 30000
+        execution.checkpointing.timeout: 10min
+        execution.checkpointing.externalized-checkpoint-retention: RETAIN_ON_CANCELLATION
+        restart-strategy.type: exponential-delay
+        s3.endpoint: http://minio:9000
+        s3.path.style.access: true
+        s3.access-key: ${S3_ACCESS_KEY}
+        s3.secret-key: ${S3_SECRET_KEY}
+        flink.hadoop.fs.s3a.endpoint: http://minio:9000
+        flink.hadoop.fs.s3a.path.style.access: true
+        flink.hadoop.fs.s3a.connection.ssl.enabled: false
+        flink.hadoop.fs.s3a.aws.credentials.provider: com.amazonaws.auth.EnvironmentVariableCredentialsProvider
+        web.upload.dir: /opt/flink/uploads
+        web.submit.enable: true
+        metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+        metrics.reporter.prom.port: 9249-9250
+    volumes:
+      - ../../dist:/opt/tmdbwh/dist:ro
+      - ./conf/hadoop:/opt/hadoop-conf:ro
+      - flink-uploads:/opt/flink/uploads
+    command: ["jobmanager"]
+    depends_on:
+      kafka-init: {condition: service_completed_successfully}
+      hive-metastore: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8081'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: {memory: 2g}
+
+  flink-taskmanager:
+    image: tmdbwh/flink:1.18.1
+    container_name: tmdbwh-flink-taskmanager
+    profiles: ["compute"]
+    environment:
+      <<: *common-env
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        jobmanager.rpc.port: 6123
+        taskmanager.memory.process.size: 4096m
+        taskmanager.numberOfTaskSlots: 4
+        state.backend.type: rocksdb
+        state.backend.incremental: true
+        execution.checkpointing.mode: EXACTLY_ONCE
+        s3.endpoint: http://minio:9000
+        s3.path.style.access: true
+        s3.access-key: ${S3_ACCESS_KEY}
+        s3.secret-key: ${S3_SECRET_KEY}
+        metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+        metrics.reporter.prom.port: 9249-9250
+    volumes:
+      - ../../dist:/opt/tmdbwh/dist:ro
+      - ./conf/hadoop:/opt/hadoop-conf:ro
+    command: ["taskmanager"]
+    depends_on:
+      flink-jobmanager: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/9249'"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: {memory: 6g}
+
+  # ===========================================================================
+  # OLAP（olap）
+  # ===========================================================================
+  clickhouse-keeper:
+    image: clickhouse/clickhouse-keeper:24.3
+    container_name: tmdbwh-clickhouse-keeper
+    profiles: ["olap"]
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:9181:9181"
+    volumes:
+      - clickhouse-keeper-data:/var/lib/clickhouse
+      - ./conf/clickhouse-keeper/keeper_config.xml:/etc/clickhouse-keeper/keeper_config.xml:ro
+    ulimits:
+      nofile: {soft: 262144, hard: 262144}
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/9181'"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 15s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: {memory: 1g}
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3
+    container_name: tmdbwh-clickhouse
+    profiles: ["olap"]
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:8123:8123"  # HTTP / JDBC
+      - "${BIND_ADDRESS:-127.0.0.1}:9002:9000"  # Native（容器 9000 与 MinIO 冲突，映射为 9002）
+      - "${BIND_ADDRESS:-127.0.0.1}:9363:9363"  # Prometheus 指标
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-default}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+      CLICKHOUSE_SKIP_USER_SETUP: 1
+      # 供 config.d 中 from_env 使用
+      CLICKHOUSE_CLUSTER_SECRET: ${CLICKHOUSE_CLUSTER_SECRET}
+      CLICKHOUSE_COLD_ENDPOINT: http://minio:9000/${CLICKHOUSE_COLD_BUCKET}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./conf/clickhouse/config.d:/etc/clickhouse-server/config.d:ro
+      - ./conf/clickhouse/users.d/10-profiles.xml:/etc/clickhouse-server/users.d/10-profiles.xml:ro
+    ulimits:
+      nofile: {soft: 262144, hard: 262144}
+    depends_on:
+      clickhouse-keeper: {condition: service_healthy}
+      minio-init: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q \"http://127.0.0.1:8123/ping\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: {memory: 8g}
+
+  # ===========================================================================
+  # 图数据库（graph）
+  # ===========================================================================
+  neo4j:
+    image: neo4j:5.20.0-community
+    container_name: tmdbwh-neo4j
+    profiles: ["graph"]
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:7474:7474"
+      - "${BIND_ADDRESS:-127.0.0.1}:7687:7687"
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER}/${NEO4J_PASSWORD}
+      NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
+      NEO4J_server_memory_heap_initial__size: 1G
+      NEO4J_server_memory_heap_max__size: 2G
+      NEO4J_server_memory_pagecache_size: 1G
+      NEO4J_server_metrics_enabled: "false"
+      NEO4J_dbms_security_procedures_unrestricted: "gds.*,apoc.*"
+      NEO4J_dbms_security_procedures_allowlist: "gds.*,apoc.*"
+    volumes:
+      - neo4j-data:/data
+      - neo4j-logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 25
+      start_period: 60s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: {memory: 4g}
+
+  # ===========================================================================
+  # TMDB Mock（mock）
+  # ===========================================================================
+  wiremock:
+    image: wiremock/wiremock:3.5.4
+    container_name: tmdbwh-wiremock
+    profiles: ["mock"]
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:8089:8080"
+    command: ["--global-response-templating", "--no-request-journal", "--disable-banner"]
+    volumes:
+      - ./conf/wiremock:/home/wiremock:ro
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080'"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 15s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: {memory: 1g}
+
+  # ===========================================================================
+  # 命令行工具容器（core，按需 run --rm）
+  # ===========================================================================
+  cli:
+    image: tmdbwh/cli:1.0.0
+    build:
+      context: ../docker/cli
+    container_name: tmdbwh-cli
+    environment:
+      <<: *common-env
+      TMDBWH_CONFIG_FILE: /opt/tmdbwh/config/application.conf
+      JAVA_OPTS: -XX:MaxRAMPercentage=75 -Duser.timezone=UTC -Dfile.encoding=UTF-8
+    volumes:
+      - ../../dist:/opt/tmdbwh/dist:ro
+      - ../../config:/opt/tmdbwh/config:ro
+    profiles: ["tools"]
+    logging: *default-logging
+
+  # ===========================================================================
+  # 调度（orchestration）
+  # ===========================================================================
+  airflow-init:
+    image: tmdbwh/airflow:2.9.2
+    build:
+      context: ../../airflow
+    container_name: tmdbwh-airflow-init
+    profiles: ["orchestration"]
+    entrypoint: ["/bin/bash", "-c", "airflow version"]
+    environment:
+      <<: *common-env
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_DB_PASSWORD}@postgres:5432/airflow
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
+      _AIRFLOW_DB_MIGRATE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_ADMIN_USER:-admin}
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-admin}
+      PYTHONWARNINGS: ignore
+    volumes:
+      - ../../airflow/dags:/opt/airflow/dags
+      - airflow-logs:/opt/airflow/logs
+      - ../../dist:/opt/tmdbwh/dist:ro
+      - ../../config:/opt/tmdbwh/config:ro
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: "no"
+    logging: *default-logging
+
+  airflow-webserver:
+    image: tmdbwh/airflow:2.9.2
+    container_name: tmdbwh-airflow-webserver
+    profiles: ["orchestration"]
+    command: ["webserver"]
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:8080:8080"
+    environment:
+      <<: *common-env
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_DB_PASSWORD}@postgres:5432/airflow
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+      PYTHONWARNINGS: ignore
+    volumes:
+      - ../../airflow/dags:/opt/airflow/dags
+      - airflow-logs:/opt/airflow/logs
+      - ../../dist:/opt/tmdbwh/dist:ro
+      - ../../config:/opt/tmdbwh/config:ro
+    depends_on:
+      airflow-init: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://127.0.0.1:8080/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: {memory: 2g}
+
+  airflow-scheduler:
+    image: tmdbwh/airflow:2.9.2
+    container_name: tmdbwh-airflow-scheduler
+    profiles: ["orchestration"]
+    command: ["scheduler"]
+    environment:
+      <<: *common-env
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_DB_PASSWORD}@postgres:5432/airflow
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
+      PYTHONWARNINGS: ignore
+    volumes:
+      - ../../airflow/dags:/opt/airflow/dags
+      - airflow-logs:/opt/airflow/logs
+      - ../../dist:/opt/tmdbwh/dist:ro
+      - ../../config:/opt/tmdbwh/config:ro
+    depends_on:
+      airflow-init: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$${HOSTNAME}\" || exit 1"]
+      interval: 30s
+      timeout: 20s
+      retries: 10
+      start_period: 90s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: {memory: 2g}
+
+  # ===========================================================================
+  # 监控（monitoring）
+  # ===========================================================================
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: tmdbwh-prometheus
+    profiles: ["monitoring"]
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:9090:9090"
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=15d"]
+    volumes:
+      - ./conf/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:9090/-/healthy || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: {memory: 2g}
+
+  pushgateway:
+    image: prom/pushgateway:v1.8.0
+    container_name: tmdbwh-pushgateway
+    profiles: ["monitoring"]
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:9091:9091"
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: {memory: 512m}
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.7.0
+    container_name: tmdbwh-kafka-exporter
+    profiles: ["monitoring"]
+    command: ["--kafka.server=kafka:9092"]
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:9308:9308"
+    depends_on:
+      kafka: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/9308'"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    container_name: tmdbwh-kafka-ui
+    profiles: ["monitoring"]
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:8087:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: tmdbwh
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      DYNAMIC_CONFIG_ENABLED: "true"
+    depends_on:
+      kafka: {condition: service_healthy}
+    logging: *default-logging
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: tmdbwh-grafana
+    profiles: ["monitoring"]
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # 供数据源 provisioning 中的 $CLICKHOUSE_USER / $CLICKHOUSE_PASSWORD 引用
+      GF_SECURITY__SECURE__CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      GF_SECURITY__SECURE__CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+    volumes:
+      - ./conf/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./conf/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      prometheus: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: {memory: 1g}
+
+  # ===========================================================================
+  # 可选：OpenMetadata（governance，资源占用较大）
+  # ===========================================================================
+  opensearch:
+    image: opensearchproject/opensearch:2.11.1
+    container_name: tmdbwh-opensearch
+    profiles: ["governance"]
+    environment:
+      discovery.type: single-node
+      plugins.security.disabled: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://127.0.0.1:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout: 8s
+      retries: 20
+      start_period: 60s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: {memory: 2g}
+
+  openmetadata-migrate:
+    image: openmetadata/server:1.4.1
+    container_name: tmdbwh-openmetadata-migrate
+    profiles: ["governance"]
+    command: ["./bootstrap/bootstrap_storage.sh", "migrate-all"]
+    environment:
+      OPENMETADATA_CLUSTER_NAME: openmetadata
+      DB_DRIVER_CLASS: org.postgresql.Driver
+      DB_SCHEME: jdbc:postgresql
+      DB_PARAMS: ""
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: openmetadata
+      DB_USER_PASSWORD: ${OM_DB_PASSWORD}
+      OM_DATABASE: openmetadata_db
+      ELASTICSEARCH_HOST: opensearch
+      ELASTICSEARCH_PORT: "9200"
+      ELASTICSEARCH_SCHEME: http
+      SEARCH_TYPE: opensearch
+      # OpenMetadata 1.x 已拆分 openmetadata.yaml；此项为兼容旧参数，缺失时回退到默认配置
+      SERVER_PORT: "8585"
+    depends_on:
+      postgres: {condition: service_healthy}
+      opensearch: {condition: service_healthy}
+    restart: "no"
+    logging: *default-logging
+
+  openmetadata-server:
+    image: openmetadata/server:1.4.1
+    container_name: tmdbwh-openmetadata-server
+    profiles: ["governance"]
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:8585:8585"
+    environment:
+      OPENMETADATA_CLUSTER_NAME: openmetadata
+      DB_DRIVER_CLASS: org.postgresql.Driver
+      DB_SCHEME: jdbc:postgresql
+      DB_PARAMS: ""
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: openmetadata
+      DB_USER_PASSWORD: ${OM_DB_PASSWORD}
+      OM_DATABASE: openmetadata_db
+      ELASTICSEARCH_HOST: opensearch
+      ELASTICSEARCH_PORT: "9200"
+      ELASTICSEARCH_SCHEME: http
+      SEARCH_TYPE: opensearch
+      SERVER_PORT: "8585"
+      # 关闭内置 Airflow pipeline client：本平台已有独立的 Airflow 与自研治理引擎
+      PIPELINE_SERVICE_CLIENT_ENABLED: "false"
+    depends_on:
+      openmetadata-migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://127.0.0.1:8585/api/v1/system/version || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 20
+      start_period: 120s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: {memory: 3g}
+
+  openmetadata-ingest:
+    image: tmdbwh/om-ingest:1.4.1
+    build:
+      context: ../docker/openmetadata-ingest
+    container_name: tmdbwh-openmetadata-ingest
+    profiles: ["governance"]
+    environment:
+      <<: *common-env
+      # 从 OpenMetadata UI（设置 → Bots → ingestion-bot）获取 JWT 后填入 .env
+      OM_JWT_TOKEN: ${OM_JWT_TOKEN:-}
+      OM_SERVER_HOST_PORT: http://openmetadata-server:8585
+      OM_CONFIG_FILE: /opt/om/config/clickhouse_metadata.yaml
+    volumes:
+      - ./conf/openmetadata:/opt/om/config:ro
+    depends_on:
+      openmetadata-server: {condition: service_healthy}
+    restart: "no"
+    logging: *default-logging
+
+volumes:
+  minio-data:
+  kafka-data:
+  postgres-data:
+  clickhouse-data:
+  clickhouse-keeper-data:
+  neo4j-data:
+  neo4j-logs:
+  prometheus-data:
+  grafana-data:
+  airflow-logs:
+  flink-uploads:
+  opensearch-data:

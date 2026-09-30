@@ -1,0 +1,49 @@
+{
+  "mappings": [
+    {
+      "name": "trending-movie",
+      "priority": 2,
+      "request": {"method": "GET", "urlPathPattern": "/3/trending/movie/(day|week)"},
+      "response": {
+        "status": 200,
+        "headers": {"Content-Type": "application/json;charset=utf-8"},
+        "bodyFileName": "lists/trending_movie.json",
+        "transformers": ["response-template"]
+      },
+      "metadata": {"description": "热度值每次请求随机生成；872585 的波动区间很大，用于触发实时飙升检测"}
+    },
+    {
+      "name": "popular-movie",
+      "priority": 2,
+      "request": {"method": "GET", "urlPathPattern": "/3/movie/(popular|now_playing|top_rated)"},
+      "response": {
+        "status": 200,
+        "headers": {"Content-Type": "application/json;charset=utf-8"},
+        "bodyFileName": "lists/trending_movie.json",
+        "transformers": ["response-template"]
+      }
+    },
+    {
+      "name": "trending-tv",
+      "priority": 2,
+      "request": {"method": "GET", "urlPathPattern": "/3/(trending/tv/(day|week)|tv/popular)"},
+      "response": {
+        "status": 200,
+        "headers": {"Content-Type": "application/json;charset=utf-8"},
+        "bodyFileName": "lists/trending_tv.json",
+        "transformers": ["response-template"]
+      }
+    },
+    {
+      "name": "trending-person",
+      "priority": 2,
+      "request": {"method": "GET", "urlPathPattern": "/3/(trending/person/(day|week)|person/popular)"},
+      "response": {
+        "status": 200,
+        "headers": {"Content-Type": "application/json;charset=utf-8"},
+        "bodyFileName": "lists/trending_person.json",
+        "transformers": ["response-template"]
+      }
+    }
+  ]
+}
