@@ -58,6 +58,8 @@ public final class SparkTestSupport {
 
     /** 一条最小可用的电影报文（含演职员、关键词、上映信息、预算与票房）。 */
     public static String moviePayload(long id, String title, double popularity, long budget, long revenue) {
+        // credit_id 必须全局唯一：演职员事实以此为主键，两部电影用相同 credit_id 会被去重掉一条
+        String suffix = "m" + id;
         return "{\"id\":" + id + ",\"title\":\"" + title + "\",\"original_title\":\"" + title + "\","
                 + "\"original_language\":\"en\",\"overview\":\"测试简介\",\"status\":\"Released\","
                 + "\"release_date\":\"2010-07-16\",\"runtime\":148,"
@@ -73,11 +75,11 @@ public final class SparkTestSupport {
                 + "\"spoken_languages\":[{\"iso_639_1\":\"en\",\"name\":\"English\"}],"
                 + "\"keywords\":{\"keywords\":[{\"id\":825,\"name\":\"dream\"},{\"id\":616,\"name\":\"subconscious\"}]},"
                 + "\"credits\":{\"cast\":["
-                + "{\"id\":6193,\"credit_id\":\"c1\",\"name\":\"Leonardo DiCaprio\",\"character\":\"Cobb\",\"order\":0},"
-                + "{\"id\":24045,\"credit_id\":\"c2\",\"name\":\"Joseph Gordon-Levitt\",\"character\":\"Arthur\",\"order\":1}],"
+                + "{\"id\":6193,\"credit_id\":\"c1-" + suffix + "\",\"name\":\"Leonardo DiCaprio\",\"character\":\"Cobb\",\"order\":0},"
+                + "{\"id\":24045,\"credit_id\":\"c2-" + suffix + "\",\"name\":\"Joseph Gordon-Levitt\",\"character\":\"Arthur\",\"order\":1}],"
                 + "\"crew\":["
-                + "{\"id\":525,\"credit_id\":\"c3\",\"name\":\"Christopher Nolan\",\"department\":\"Directing\",\"job\":\"Director\"},"
-                + "{\"id\":525,\"credit_id\":\"c4\",\"name\":\"Christopher Nolan\",\"department\":\"Writing\",\"job\":\"Screenplay\"}]},"
+                + "{\"id\":525,\"credit_id\":\"c3-" + suffix + "\",\"name\":\"Christopher Nolan\",\"department\":\"Directing\",\"job\":\"Director\"},"
+                + "{\"id\":525,\"credit_id\":\"c4-" + suffix + "\",\"name\":\"Christopher Nolan\",\"department\":\"Writing\",\"job\":\"Screenplay\"}]},"
                 + "\"release_dates\":{\"results\":["
                 + "{\"iso_3166_1\":\"US\",\"release_dates\":["
                 + "{\"certification\":\"PG-13\",\"release_date\":\"2010-07-16T00:00:00.000Z\",\"type\":3}]},"

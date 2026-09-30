@@ -92,10 +92,10 @@ class DwdTransformTest {
 
         assertThat(fact.count()).isEqualTo(4);
         assertThat(new java.util.HashSet<>(SparkTestSupport.values(fact, "country_code")))
-                .containsExactly("US", "GB");
+                .containsExactlyInAnyOrder("US", "GB");
         assertThat(new java.util.HashSet<>(SparkTestSupport.values(fact, "release_type"))).containsExactly("院线");
         assertThat(new java.util.HashSet<>(SparkTestSupport.values(fact, "certification")))
-                .containsExactly("PG-13", "12A");
+                .containsExactlyInAnyOrder("PG-13", "12A");
     }
 
     @Test

@@ -33,7 +33,7 @@ class IcebergMaintenanceTest {
     @Test
     void dryRunNeverCompactsBecauseItWouldWrite() {
         // 小文件合并是写操作，dry-run 必须跳过而不是"顺便执行"
-        java.util.List<String> output = IcebergMaintenance.run(null, "dwd.t", true, true, true, true);
+        java.util.List<String> output = IcebergMaintenance.run((org.apache.spark.sql.SparkSession) null, "dwd.t", true, true, true, true);
         assertThat(output).allSatisfy(line -> assertThat(line).startsWith("[dry-run]"));
         assertThat(output).noneMatch(line -> line.contains("rewrite_data_files -> "));
     }

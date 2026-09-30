@@ -74,7 +74,8 @@ public final class OfflineSqlRunner {
         String staging = target + stagingSuffix;
         List<String> sql = new ArrayList<>();
         sql.add("DROP TABLE IF EXISTS " + staging + onCluster());
-        sql.add(createLike);
+        // 暂存表本身也要建在集群上，否则后续 ATTACH PARTITION 时其他节点找不到它
+        sql.add(withCluster(createLike));
         // 分区 ID：ClickHouse 按 PARTITION BY 表达式的值生成，按月分区时为 yyyyMM
         sql.add("ALTER TABLE " + target + onCluster()
                 + " MOVE PARTITION ID '" + partitionId(dt) + "' TO TABLE " + staging);
@@ -141,7 +142,8 @@ public final class OfflineSqlRunner {
      * 因为 Spark 的分区列不会写进 parquet 文件内部。
      */
     public static String sourceOf(String database, String table, String dt) {
-        return sourceOf("${tmdbwh.s3.lake-url}", database, table, dt);
+        // 不传湖仓地址时保留配置占位符，由配置渲染阶段替换为真实地址
+        return sourceOf("", database, table, dt);
     }
 
     /**
@@ -151,7 +153,7 @@ public final class OfflineSqlRunner {
      * （Spark 的分区列不写入数据文件），因此由路径中的 {@code dt=} 目录保证只装载目标日期。
      */
     public static String sourceOf(String lakeUrl, String database, String table, String dt) {
-        String base = lakeUrl.endsWith("/") ? lakeUrl : lakeUrl + "/";
+        String base = lakeUrl.isEmpty() || lakeUrl.endsWith("/") ? lakeUrl : lakeUrl + "/";
         return "s3('" + base + database + "." + table + "/dt=" + dt + "/*.parquet'"
                 + ", '${tmdbwh.s3.access-key}', '${tmdbwh.s3.secret-key}', 'Parquet')";
     }

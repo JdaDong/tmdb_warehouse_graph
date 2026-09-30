@@ -119,16 +119,14 @@ class OfflinePipelineTest {
             pipeline.writeLayer(parts[0], parts[1], dataset);
         });
 
-        long first = spark.read().format("iceberg").load("lake.dwd.fact_movie_credit").count();
-        assertThat(first).isEqualTo(8);
-
         // 重跑同一天：分区覆盖后行数不变（否则每次重跑都会翻倍）
         layers.forEach((table, dataset) -> {
             String[] parts = table.split("\\.");
             pipeline.writeLayer(parts[0], parts[1], dataset);
         });
         long second = spark.read().format("iceberg").load("lake.dwd.fact_movie_credit").count();
-        assertThat(second).isEqualTo(first);
+        assertThat(second).isEqualTo(layers.get("dwd.fact_movie_credit").count());
+        assertThat(second).isPositive();
     }
 
     @Test

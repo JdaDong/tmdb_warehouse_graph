@@ -85,7 +85,7 @@ public final class Scd2 {
             result = target;
         } else {
             Dataset<Row> closed = closeExisting(target, changed, key);
-            result = closed.unionByName(changed.select(selectAllAsColumns(target)));
+            result = closed.unionByName(selectByName(changed, target));
         }
         changed.unpersist();
         return result.dropDuplicates(key, "valid_from").sort(functions.col(key), functions.col("valid_from"));
@@ -98,27 +98,34 @@ public final class Scd2 {
      * 已被更早版本收敛过的行不会被再次放宽。
      */
     static Dataset<Row> closeExisting(Dataset<Row> target, Dataset<Row> changed, String key) {
-        Dataset<Row> boundaries = changed.select(functions.col(key), functions.col("valid_from")).distinct();
-        return target
-                .join(boundaries, ScalaSeqs.of(key), "left")
-                .withColumn("valid_to", functions.least(
+        // 边界列必须改名再 join：两侧都有 valid_from，同名列会让 Spark 无法解析
+        Dataset<Row> boundaries = changed
+                .select(functions.col(key).as("boundary_key"),
+                        functions.col("valid_from").as("boundary_end"))
+                .distinct();
+        // 先写成新列再替换：直接 withColumn("valid_to", ...) 会让后续引用产生同名列歧义
+        Dataset<Row> closed = target
+                .join(boundaries,
+                        target.col(key).equalTo(boundaries.col("boundary_key")), "left")
+                .withColumn("closed_to", functions.least(
                         target.col("valid_to").cast("timestamp"),
-                        functions.coalesce(boundaries.col("valid_from").cast("timestamp"),
+                        functions.coalesce(boundaries.col("boundary_end").cast("timestamp"),
                                 target.col("valid_to").cast("timestamp"))))
-                .select(selectAllAsColumns(target));
+                .drop("valid_to")
+                .withColumnRenamed("closed_to", "valid_to");
+        return selectByName(closed, target);
     }
 
     /**
-     * join 后同名列会被 Spark 自动改写（或产生重复列），这里显式按目标列取一次，
-     * 保证输出 Schema 与目标表一致；同时适配 select(Column...) 重载。
+     * 按目标表的列名重新投影，保证输出 Schema 与目标表一致。
+     *
+     * <p>必须用<b>列名</b>而不是 {@code target.col(...)} 的 Column 实例：后者携带的是原 Dataset
+     * 的属性引用，经过 withColumn 替换后会指向已不存在的属性，导致 MISSING_ATTRIBUTES 错误。
      */
-    private static Column[] selectAllAsColumns(Dataset<Row> target) {
+    private static Dataset<Row> selectByName(Dataset<Row> dataset, Dataset<Row> target) {
         String[] names = target.columns();
-        Column[] columns = new Column[names.length];
-        for (int i = 0; i < names.length; i++) {
-            columns[i] = target.col(names[i]).as(names[i]);
-        }
-        return columns;
+        // Spark 只有 select(String, String...) 重载，没有 select(String[])
+        return dataset.select(names[0], java.util.Arrays.copyOfRange(names, 1, names.length));
     }
 
     /**

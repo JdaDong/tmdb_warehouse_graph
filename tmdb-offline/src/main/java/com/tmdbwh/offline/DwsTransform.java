@@ -36,7 +36,11 @@ public final class DwsTransform {
      */
     public static Dataset<Row> movieMetric1d(Dataset<Row> factSnapshot, Dataset<Row> factCredit,
             Dataset<Row> dimMovieCurrent, String dt) {
-        WindowSpec prev = Window.partitionBy("movie_id").orderBy("dt").rowsBetween(-7, -7);
+        // 注意用 rangeBetween 而不是 rowsBetween：缺少某些天的快照时，按行数偏移会取到错误的日期，
+        // 只有按日期范围（7 天）定位才能保证"环比"真的是 7 天前
+        WindowSpec prev = Window.partitionBy("movie_id")
+                .orderBy(functions.col("dt").cast("timestamp").cast("long"))
+                .rangeBetween(-7 * 86400, -7 * 86400);
         Dataset<Row> credits = factCredit
                 .groupBy("dt", "movie_id")
                 .agg(functions.sum(functions.when(col("credit_type").equalTo("cast"), lit(1)).otherwise(lit(0)))

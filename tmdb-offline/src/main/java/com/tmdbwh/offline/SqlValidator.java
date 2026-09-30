@@ -18,7 +18,7 @@ public final class SqlValidator {
 
     /** 允许出现在 ClickHouse SQL 中的语句开头。 */
     private static final List<String> ALLOWED_STARTS = Arrays.asList(
-            "INSERT", "ALTER", "SELECT", "CREATE", "DROP", "TRUNCATE", "OPTIMIZE", "SYSTEM", "--");
+            "INSERT", "ALTER", "SELECT", "CREATE", "DROP", "TRUNCATE", "OPTIMIZE", "SYSTEM", "CALL", "--");
 
     /** Spark 专有函数（出现在 ClickHouse 脚本里说明复制错了文件）。 */
     private static final List<String> SPARK_ONLY = Arrays.asList(
@@ -116,7 +116,8 @@ public final class SqlValidator {
             }
             if (c == '-' && i + 1 < sql.length() && sql.charAt(i + 1) == '-') {
                 inLineComment = true;
-                current.append(c);
+                current.append("--");
+                i++;
                 continue;
             }
             if (c == '\'') {
@@ -141,6 +142,11 @@ public final class SqlValidator {
         for (int i = 0; i < sql.length(); i++) {
             char c = sql.charAt(i);
             if (c == '\'') {
+                // ClickHouse 的转义是双写单引号（''），不是反斜杠
+                if (inString && i + 1 < sql.length() && sql.charAt(i + 1) == '\'') {
+                    i++;
+                    continue;
+                }
                 inString = !inString;
                 continue;
             }
