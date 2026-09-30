@@ -39,6 +39,22 @@ class OfflinePipelineTest {
         }
     }
 
+    /**
+     * 每个用例前清空湖仓表。
+     *
+     * <p>维度走 SCD2 合并，会读取湖仓中已有版本链；若用例之间共享同一仓库，
+     * "空输入"用例就会读到上一个用例写入的数据，掩盖真实行为。
+     */
+    @org.junit.jupiter.api.BeforeEach
+    void resetLake() {
+        for (String table : java.util.Arrays.asList("dwd.dim_movie", "dwd.dim_person", "dwd.fact_movie_credit",
+                "dws.dws_movie_metric_1d")) {
+            if (spark.catalog().tableExists("lake." + table)) {
+                spark.sql("DROP TABLE IF EXISTS lake." + table);
+            }
+        }
+    }
+
     private static Dataset<Row> rawMovie(String dt) {
         return SparkTestSupport.raw(spark, "movie", dt,
                 SparkTestSupport.moviePayload(27205, "Inception", 83.95, 160000000L, 836000000L),

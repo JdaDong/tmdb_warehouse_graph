@@ -51,6 +51,21 @@ public final class OfflineSqlRunner {
         return url.endsWith("/") ? url : url + "/";
     }
 
+    /** 为 DDL 追加 ON CLUSTER（集群模式）；已有该子句或非 DDL 时原样返回。 */
+    private String withCluster(String sql) {
+        String trimmed = sql.trim();
+        if (cluster.isEmpty()) {
+            return sql;
+        }
+        String upper = trimmed.toUpperCase(java.util.Locale.ROOT);
+        if (upper.contains("ON CLUSTER")) {
+            return sql;
+        }
+        boolean isDdl = upper.startsWith("CREATE") || upper.startsWith("ALTER") || upper.startsWith("DROP")
+                || upper.startsWith("TRUNCATE") || upper.startsWith("RENAME") || upper.startsWith("SYSTEM");
+        return isDdl ? trimmed + " ON CLUSTER " + ClickHouseSql.identifier(cluster) : sql;
+    }
+
     private String onCluster() {
         return ClickHouseSql.onCluster(cluster);
     }

@@ -67,11 +67,14 @@ class OfflineSqlRunnerTest {
     @Test
     void sourcePointsAtLakeParquetForTheGivenDate() {
         String source = OfflineSqlRunner.sourceOf("http://minio:9000/tmdb-lake/warehouse",
-                "dws.dws_movie_metric_1d", "2026-09-30");
+                "dws", "dws_movie_metric_1d", "2026-09-30");
 
         assertThat(source).contains("s3('http://minio:9000/tmdb-lake/warehouse/dws.dws_movie_metric_1d")
                 .contains("/dt=2026-09-30/*.parquet'")
                 .contains("'Parquet'");
+        // 不传地址时保留配置占位符，由配置渲染阶段替换
+        assertThat(OfflineSqlRunner.sourceOf("dws", "dws_movie_metric_1d", "2026-09-30"))
+                .startsWith("s3('${tmdbwh.s3.lake-url}dws.dws_movie_metric_1d");
     }
 
     @Test
