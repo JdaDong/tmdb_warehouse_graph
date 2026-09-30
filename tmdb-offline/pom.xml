@@ -22,6 +22,7 @@
 
     <properties>
         <jacoco.line.minimum>0.60</jacoco.line.minimum>
+        <shade.mainClass>com.tmdbwh.offline.cli.OfflineCli</shade.mainClass>
     </properties>
 
     <dependencies>
@@ -55,6 +56,10 @@
         <dependency>
             <groupId>org.neo4j</groupId>
             <artifactId>neo4j-connector-apache-spark_${scala.binary.version}</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>info.picocli</groupId>
+            <artifactId>picocli</artifactId>
         </dependency>
     </dependencies>
 
@@ -90,6 +95,9 @@
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
                                     <resource>reference.conf</resource>
+                                </transformer>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>${shade.mainClass}</mainClass>
                                 </transformer>
                             </transformers>
                         </configuration>
