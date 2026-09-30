@@ -8,7 +8,8 @@
 - **知识图谱**：Neo4j 5（影视关系网络、GDS 图算法、结果回流）
 - **部署**：Docker Compose（本地一键启动）与 Kubernetes Helm
 
-> 项目按模块逐步交付中，当前已完成：Maven 多模块骨架、代码规范、`tmdb-common` 公共组件与单元测试。
+> 六个业务模块的主体代码、单元测试、运维脚本与设计文档均已提供。
+> 首次使用请先 `make build` 构建，再用 `make smoke` 端到端验证环境（无 TMDB API Key 也可用内置 Mock 跑通）。
 
 ## 模块
 
@@ -157,3 +158,37 @@ make validate-config
 - Checkstyle 在 `validate` 阶段执行，违规即构建失败；公共类必须有类级 Javadoc。
 - 单元测试 `*Test`（Surefire），集成测试 `*IT`（Failsafe，`-Pit`）；`tmdb-common` 行覆盖率门禁 80%。
 # tmdb_warehouse_graph
+
+## 运行
+
+```bash
+make env-init                                   # 由 .env.example 生成 .env
+make up                                         # 启动（core,olap,graph,compute,mock）
+make wait && make init                          # 等待健康并初始化
+make smoke                                      # 端到端冒烟
+
+make ingest MODE=incremental DATE=2026-09-30    # 采集
+make offline DATE=2026-09-30 SYNC=--sync        # 离线分层 + 同步 ClickHouse
+make realtime JOB=popularity-trend              # 提交实时作业
+make graph SUB=stats                            # 图统计
+make governance SUB=quality ARGS=2026-09-30     # 质量检查
+```
+
+## 文档
+
+完整设计文档见 [`docs/`](docs/README.md)：
+
+| 文档 | 内容 |
+| --- | --- |
+| [01-architecture.md](docs/01-architecture.md) | 总体架构、技术选型与设计权衡 |
+| [02-data-model.md](docs/02-data-model.md) | 分层模型、维度建模、SCD2 |
+| [03-offline.md](docs/03-offline.md) | 离线链路、幂等与分区替换 |
+| [04-realtime.md](docs/04-realtime.md) | 实时语义、去重、窗口与飙升检测 |
+| [05-graph.md](docs/05-graph.md) | 图模型、装载与分析用例 |
+| [06-governance.md](docs/06-governance.md) | 质量、血缘、生命周期、权限、指标口径 |
+| [07-deployment.md](docs/07-deployment.md) | Compose 与 Helm 部署、资源基线 |
+| [08-operations.md](docs/08-operations.md) | 日常作业、监控告警、备份恢复 |
+| [09-development.md](docs/09-development.md) | 模块结构、测试策略、编码规范 |
+| [10-data-dictionary.md](docs/10-data-dictionary.md) | 各层表与字段 |
+| [11-metrics.md](docs/11-metrics.md) | 指标口径与边界 |
+| [12-troubleshooting.md](docs/12-troubleshooting.md) | 故障排查手册 |
