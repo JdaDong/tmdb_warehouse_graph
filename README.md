@@ -54,6 +54,29 @@ make fmt                      # 自动格式化
 
 配置在启动时一次性汇总并报告所有校验错误；打印配置时密钥会自动脱敏。
 
+## 数据库迁移（ClickHouse）
+
+```bash
+make dist                                   # 先构建 fat-jar
+make cli CLI_ARGS='governance migrate'      # 应用待执行的迁移
+make cli CLI_ARGS='governance migrate --dry-run'
+make cli CLI_ARGS='governance migrate --info'
+```
+
+约定：
+
+- 脚本位于 `tmdb-governance/src/main/resources/clickhouse/migrations/V<n>__<name>.sql`，**只增不改**；
+- 执行记录写入 `governance.schema_migrations`（版本、名称、校验和、耗时、执行人）；
+- 已执行脚本被修改会因**校验和不匹配**直接报错；脚本最高版本低于库内版本会报**版本回退**；
+- 集群模式下由迁移器自动追加 `ON CLUSTER`，脚本中不写死；迁移前会校验集群名是否存在于 `system.clusters`；
+- 禁止手工 DDL。
+
+当前版本 V12，覆盖：分层数据库（V1）、ODS 原始报文与事件（V2-V3）、DWD 维度/桥接/事实（V4-V6，含 SCD2）、
+DWS 汇总（V7）、ADS 报表（V8）、实时层（V9）、治理结果表（V10）、物化视图（V11）、生命周期视图（V12）。
+
+> 部署前提：所有带冷热分层的表都声明了 `storage_policy = 'hot_cold'`，
+> 该策略由 `deploy/compose/conf/clickhouse/config.d/20-storage.xml` 提供；换成其他环境时需先创建同名策略。
+
 ## 采集使用
 
 ```bash

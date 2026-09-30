@@ -116,6 +116,7 @@ public class SchemaMigrator implements AutoCloseable {
      */
     public MigrationResult migrate(boolean dryRun, Path extraDir) {
         List<Migration> scripts = loadScripts(extraDir);
+        verifyCluster();
         ensureHistoryTable();
         Map<Integer, String> applied = readAppliedChecksums();
         verifyChecksums(scripts, applied);
@@ -233,6 +234,33 @@ public class SchemaMigrator implements AutoCloseable {
         } catch (RuntimeException e) {
             // 历史记录写失败不能掩盖迁移本身的结果，但必须明确告警，避免"执行过却没记录"
             LOG.error("写入迁移历史失败 V{}: {}", script.getVersion(), e.toString());
+        }
+    }
+
+    /**
+     * 集群配置自检。
+     *
+     * <p>两类事故都可以提前拦住：
+     *
+     * <ul>
+     *   <li>配置了集群名，但服务端没有该集群（例如连的是单机）——否则 DDL 会因未知集群直接失败；
+     *   <li>服务端是集群，但没配集群名——DDL 只会落在当前节点，副本间结构不一致且很难发现。
+     * </ul>
+     */
+    private void verifyCluster() {
+        List<String> clusters = client.query("SELECT DISTINCT cluster FROM system.clusters",
+                rs -> rs.getString(1));
+        if (!cluster.isEmpty()) {
+            if (!clusters.contains(cluster)) {
+                throw new MigrationException(String.format(
+                        "配置的集群 %s 在服务端不存在（system.clusters 中可见：%s）", cluster, clusters));
+            }
+            return;
+        }
+        boolean hasRealCluster = clusters.stream().anyMatch(c -> !"default".equals(c));
+        if (hasRealCluster) {
+            LOG.warn("当前未配置集群名，但服务端存在集群 {}：DDL 只会作用于连接到的节点，多副本环境请显式配置集群名",
+                    clusters);
         }
     }
 
