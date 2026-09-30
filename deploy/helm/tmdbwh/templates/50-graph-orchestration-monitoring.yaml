@@ -1,0 +1,390 @@
+{{- if .Values.neo4j.enabled }}
+# =============================================================================
+# Neo4j（图数据库）
+#
+# 社区版只有单库可写，生产若需高可用请用企业版集群或 Neo4j Aura。
+# 图数据由离线链路装载（graph load），因此可以看作"可重建"的派生数据：
+# 丢失后重跑装载即可，备份优先级低于 ClickHouse 与对象存储。
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tmdbwh.fullname" . }}-neo4j
+  labels:
+    {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "graph") | nindent 4 }}
+spec:
+  ports:
+    - name: bolt
+      port: 7687
+      targetPort: 7687
+    - name: http
+      port: 7474
+      targetPort: 7474
+    - name: metrics
+      port: 2004
+      targetPort: 2004
+  selector:
+    {{- include "tmdbwh.componentSelectorLabels" (dict "ctx" . "component" "graph") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "tmdbwh.fullname" . }}-neo4j
+  labels:
+    {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "graph") | nindent 4 }}
+spec:
+  serviceName: {{ include "tmdbwh.fullname" . }}-neo4j
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "tmdbwh.componentSelectorLabels" (dict "ctx" . "component" "graph") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "graph") | nindent 8 }}
+    spec:
+      containers:
+        - name: neo4j
+          image: "{{ .Values.global.imageRegistry }}{{ .Values.neo4j.image.repository }}:{{ .Values.neo4j.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          env:
+            - name: NEO4J_AUTH
+              value: {{ printf "%s/%s" .Values.neo4j.auth.user .Values.neo4j.auth.password | quote }}
+            - name: NEO4J_server_metrics_enabled
+              value: "true"
+            - name: NEO4J_server_metrics_prometheus_enabled
+              value: "true"
+            # 页缓存建议设为可用内存的 50%~60%：图遍历极度依赖缓存命中率
+            - name: NEO4J_server_memory_pagecache_size
+              value: "4G"
+            - name: NEO4J_server_memory_heap_max__size
+              value: "4G"
+          ports:
+            - containerPort: 7687
+            - containerPort: 7474
+            - containerPort: 2004
+          resources:
+            requests:
+              cpu: {{ .Values.neo4j.resources.requests.cpu | quote }}
+              memory: {{ .Values.neo4j.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.neo4j.resources.limits.cpu | quote }}
+              memory: {{ .Values.neo4j.resources.limits.memory }}
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 7474
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.neo4j.persistence.size }}
+{{- end }}
+{{- if .Values.airflow.enabled }}
+---
+# =============================================================================
+# Airflow（调度）：Webserver + Scheduler
+#
+# 生产建议用官方 Chart（支持 CeleryExecutor / KubernetesExecutor 与自动伸缩）。
+# 这里用 LocalExecutor 的最小形态：任务在 scheduler 所在容器内执行，
+# 适合演示与小规模场景；任务量上来后必须换成 CeleryExecutor。
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tmdbwh.fullname" . }}-airflow
+  labels:
+    {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "orchestration") | nindent 4 }}
+spec:
+  ports:
+    - name: web
+      port: 8080
+      targetPort: 8080
+  selector:
+    {{- include "tmdbwh.componentSelectorLabels" (dict "ctx" . "component" "orchestration") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tmdbwh.fullname" . }}-airflow-scheduler
+  labels:
+    {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "orchestration") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "tmdbwh.componentSelectorLabels" (dict "ctx" . "component" "orchestration") | nindent 6 }}
+      app.kubernetes.io/role: scheduler
+  template:
+    metadata:
+      labels:
+        {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "orchestration") | nindent 8 }}
+        app.kubernetes.io/role: scheduler
+    spec:
+      containers:
+        - name: scheduler
+          image: "{{ .Values.global.imageRegistry }}{{ .Values.airflow.image.repository }}:{{ .Values.airflow.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args: ["scheduler"]
+          env:
+            - name: AIRFLOW__CORE__EXECUTOR
+              value: {{ .Values.airflow.executor | quote }}
+            - name: AIRFLOW__CORE__FERNET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.config.secretName }}
+                  key: airflow-fernet-key
+                  optional: true
+            - name: AIRFLOW__WEBSERVER__SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.config.secretName }}
+                  key: airflow-webserver-secret-key
+                  optional: true
+            - name: AIRFLOW__CORE__DAGS_FOLDER
+              value: /opt/airflow/dags
+            - name: AIRFLOW__CORE__LOAD_EXAMPLES
+              value: "False"
+          volumeMounts:
+            - name: dags
+              mountPath: /opt/airflow/dags
+            - name: config
+              mountPath: /opt/tmdbwh/config/application.conf
+              subPath: application.conf
+      volumes:
+        - name: dags
+          configMap:
+            name: {{ include "tmdbwh.fullname" . }}-dags
+        - name: config
+          configMap:
+            name: {{ include "tmdbwh.fullname" . }}-config
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tmdbwh.fullname" . }}-airflow-webserver
+  labels:
+    {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "orchestration") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "tmdbwh.componentSelectorLabels" (dict "ctx" . "component" "orchestration") | nindent 6 }}
+      app.kubernetes.io/role: webserver
+  template:
+    metadata:
+      labels:
+        {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "orchestration") | nindent 8 }}
+        app.kubernetes.io/role: webserver
+    spec:
+      containers:
+        - name: webserver
+          image: "{{ .Values.global.imageRegistry }}{{ .Values.airflow.image.repository }}:{{ .Values.airflow.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args: ["webserver"]
+          env:
+            - name: AIRFLOW__CORE__EXECUTOR
+              value: {{ .Values.airflow.executor | quote }}
+            - name: AIRFLOW__WEBSERVER__SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.config.secretName }}
+                  key: airflow-webserver-secret-key
+                  optional: true
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          volumeMounts:
+            - name: dags
+              mountPath: /opt/airflow/dags
+      volumes:
+        - name: dags
+          configMap:
+            name: {{ include "tmdbwh.fullname" . }}-dags
+{{- end }}
+{{- if .Values.monitoring.enabled }}
+---
+# =============================================================================
+# 监控：Prometheus + Pushgateway + Grafana
+#
+# 说明：生产建议使用 kube-prometheus-stack（含 Operator、持久化与高可用）。
+# 这里的最小形态复用 deploy/compose/conf 下的抓取配置与告警规则，
+# 便于本地 Compose 与 K8s 两套环境使用同一份告警口径。
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "tmdbwh.fullname" . }}-prometheus-rules
+  labels:
+    {{- include "tmdbwh.labels" . | nindent 4 }}
+data:
+  alerts.yml: |
+    groups:
+      - name: tmdbwh
+        rules:
+          - alert: ClickHouseDown
+            expr: up{job="clickhouse"} == 0
+            for: 2m
+            labels: {severity: critical}
+            annotations: {summary: "ClickHouse 不可用"}
+          - alert: FlinkJobNotRunning
+            expr: flink_jobmanager_numRunningJobs == 0
+            for: 5m
+            labels: {severity: warning}
+            annotations: {summary: "Flink 集群中没有运行中的作业"}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tmdbwh.fullname" . }}-prometheus
+  labels:
+    {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "monitoring") | nindent 4 }}
+spec:
+  ports:
+    - name: web
+      port: 9090
+      targetPort: 9090
+  selector:
+    {{- include "tmdbwh.componentSelectorLabels" (dict "ctx" . "component" "monitoring") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tmdbwh.fullname" . }}-prometheus
+  labels:
+    {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "monitoring") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "tmdbwh.componentSelectorLabels" (dict "ctx" . "component" "monitoring") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "monitoring") | nindent 8 }}
+    spec:
+      containers:
+        - name: prometheus
+          image: "{{ .Values.global.imageRegistry }}{{ .Values.monitoring.prometheus.image.repository }}:{{ .Values.monitoring.prometheus.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args: ["--config.file=/etc/prometheus/prometheus.yml"]
+          ports:
+            - containerPort: 9090
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus/prometheus.yml
+              subPath: prometheus.yml
+            - name: rules
+              mountPath: /etc/prometheus/rules/alerts.yml
+              subPath: alerts.yml
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "tmdbwh.fullname" . }}-config
+        - name: rules
+          configMap:
+            name: {{ include "tmdbwh.fullname" . }}-prometheus-rules
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tmdbwh.fullname" . }}-pushgateway
+  labels:
+    {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "monitoring") | nindent 4 }}
+spec:
+  ports:
+    - name: web
+      port: 9091
+      targetPort: 9091
+  selector:
+    {{- include "tmdbwh.componentSelectorLabels" (dict "ctx" . "component" "monitoring") | nindent 4 }}
+    app.kubernetes.io/role: pushgateway
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tmdbwh.fullname" . }}-pushgateway
+  labels:
+    {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "monitoring") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "tmdbwh.componentSelectorLabels" (dict "ctx" . "component" "monitoring") | nindent 6 }}
+      app.kubernetes.io/role: pushgateway
+  template:
+    metadata:
+      labels:
+        {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "monitoring") | nindent 8 }}
+        app.kubernetes.io/role: pushgateway
+    spec:
+      containers:
+        - name: pushgateway
+          image: "{{ .Values.global.imageRegistry }}{{ .Values.monitoring.pushgateway.image.repository }}:{{ .Values.monitoring.pushgateway.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - containerPort: 9091
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tmdbwh.fullname" . }}-grafana
+  labels:
+    {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "monitoring") | nindent 4 }}
+spec:
+  ports:
+    - name: web
+      port: 3000
+      targetPort: 3000
+  selector:
+    {{- include "tmdbwh.componentSelectorLabels" (dict "ctx" . "component" "monitoring") | nindent 4 }}
+    app.kubernetes.io/role: grafana
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tmdbwh.fullname" . }}-grafana
+  labels:
+    {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "monitoring") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "tmdbwh.componentSelectorLabels" (dict "ctx" . "component" "monitoring") | nindent 6 }}
+      app.kubernetes.io/role: grafana
+  template:
+    metadata:
+      labels:
+        {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "monitoring") | nindent 8 }}
+        app.kubernetes.io/role: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: "{{ .Values.global.imageRegistry }}{{ .Values.monitoring.grafana.image.repository }}:{{ .Values.monitoring.grafana.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          env:
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.config.secretName }}
+                  key: grafana-admin-password
+                  optional: true
+            - name: GF_INSTALL_PLUGINS
+              # ClickHouse 官方插件，用于查询面板直连 OLAP
+              value: "grafana-clickhouse-datasource"
+          ports:
+            - containerPort: 3000
+{{- end }}

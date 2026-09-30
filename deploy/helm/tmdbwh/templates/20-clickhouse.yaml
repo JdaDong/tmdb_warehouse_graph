@@ -1,0 +1,96 @@
+{{- if .Values.clickhouse.enabled }}
+# =============================================================================
+# ClickHouse：OLAP 引擎 + 数据治理载体
+#
+# 说明：单副本部署仅适合演示。生产请使用：
+#   - 2 副本 × 2 分片（或更多）+ ClickHouse Keeper；
+#   - 每个分片独立 PVC，且冷热分层（hot SSD / cold 对象存储）；
+#   - DDL 全部带 ON CLUSTER（本项目迁移脚本已遵循）。
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tmdbwh.fullname" . }}-clickhouse
+  labels:
+    {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "olap") | nindent 4 }}
+spec:
+  ports:
+    - name: http
+      port: 8123
+      targetPort: 8123
+    - name: native
+      port: 9000
+      targetPort: 9000
+    - name: metrics
+      port: 9363
+      targetPort: 9363
+  selector:
+    {{- include "tmdbwh.componentSelectorLabels" (dict "ctx" . "component" "olap") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "tmdbwh.fullname" . }}-clickhouse
+  labels:
+    {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "olap") | nindent 4 }}
+spec:
+  serviceName: {{ include "tmdbwh.fullname" . }}-clickhouse
+  replicas: {{ .Values.clickhouse.replicas }}
+  selector:
+    matchLabels:
+      {{- include "tmdbwh.componentSelectorLabels" (dict "ctx" . "component" "olap") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "olap") | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9363"
+    spec:
+      containers:
+        - name: clickhouse
+          image: "{{ .Values.global.imageRegistry }}{{ .Values.clickhouse.image.repository }}:{{ .Values.clickhouse.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          env:
+            - name: CLICKHOUSE_USER
+              value: default
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.config.secretName }}
+                  key: clickhouse-password
+                  optional: true
+            - name: CLICKHOUSE_CLUSTER
+              value: {{ .Values.clickhouse.clusterName | quote }}
+          ports:
+            - containerPort: 8123
+            - containerPort: 9000
+            - containerPort: 9363
+          # ClickHouse 对 OOM 很敏感：limits 必须留足，且不要设置 CPU 硬限过低
+          resources:
+            requests:
+              cpu: {{ .Values.clickhouse.resources.requests.cpu | quote }}
+              memory: {{ .Values.clickhouse.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.clickhouse.resources.limits.cpu | quote }}
+              memory: {{ .Values.clickhouse.resources.limits.memory }}
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: 8123
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/clickhouse
+            # 服务器级配置（集群、冷热分层、TTL）通过 governance 的迁移脚本下发，
+            # 避免"配置改在 ConfigMap 里、实际库里的表结构与之一致性无人校验"的问题
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.clickhouse.persistence.hotSize }}
+{{- end }}

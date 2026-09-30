@@ -1,0 +1,96 @@
+{{- if .Values.kafka.enabled }}
+# =============================================================================
+# Kafka（KRaft 模式，无需 ZooKeeper）
+#
+# 生产建议用 Strimzi Operator：rolling update、证书轮转、分区再平衡都是刚需。
+# 这里给出单节点 KRaft 的最小可用形态，用于把 Compose 环境搬到 K8s。
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tmdbwh.fullname" . }}-kafka
+  labels:
+    {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "messaging") | nindent 4 }}
+spec:
+  ports:
+    - name: client
+      port: 9092
+      targetPort: 9092
+    - name: internal
+      port: 9093
+      targetPort: 9093
+  selector:
+    {{- include "tmdbwh.componentSelectorLabels" (dict "ctx" . "component" "messaging") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "tmdbwh.fullname" . }}-kafka
+  labels:
+    {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "messaging") | nindent 4 }}
+spec:
+  serviceName: {{ include "tmdbwh.fullname" . }}-kafka
+  replicas: {{ .Values.kafka.replicas }}
+  selector:
+    matchLabels:
+      {{- include "tmdbwh.componentSelectorLabels" (dict "ctx" . "component" "messaging") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "messaging") | nindent 8 }}
+    spec:
+      containers:
+        - name: kafka
+          image: "{{ .Values.global.imageRegistry }}{{ .Values.kafka.image.repository }}:{{ .Values.kafka.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          env:
+            - name: KAFKA_NODE_ID
+              value: "1"
+            - name: KAFKA_PROCESS_ROLES
+              value: "broker,controller"
+            - name: KAFKA_LISTENERS
+              value: "PLAINTEXT://:9092,CONTROLLER://:9093"
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: "PLAINTEXT://{{ include "tmdbwh.fullname" . }}-kafka:9092"
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: "1@{{ include "tmdbwh.fullname" . }}-kafka:9093"
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: "CONTROLLER"
+            - name: KAFKA_CLUSTER_ID
+              value: {{ .Values.kafka.clusterId | quote }}
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: "1"
+            - name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS
+              value: "0"
+            - name: KAFKA_LOG_RETENTION_HOURS
+              # 实时链路的 Topic 保留期：够排障重放即可，不必长期保存
+              value: "168"
+          ports:
+            - containerPort: 9092
+            - containerPort: 9093
+          # 就绪探针用 admin API 判断 broker 真正可用（端口通不代表已加入集群）
+          readinessProbe:
+            exec:
+              command:
+                - /opt/kafka/bin/kafka-topics.sh
+                - --bootstrap-server
+                - localhost:9092
+                - --list
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/kafka/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.kafka.persistence.size }}
+{{- end }}

@@ -1,0 +1,206 @@
+{{- if .Values.minio.enabled }}
+# =============================================================================
+# 对象存储（演示用内置 MinIO）：数据湖桶 + 冷数据桶
+# 生产建议改用外部 S3 / MinIO Operator（externalS3.enabled=true 时本段不渲染）
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tmdbwh.fullname" . }}-minio
+  labels:
+    {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "storage") | nindent 4 }}
+spec:
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
+  selector:
+    {{- include "tmdbwh.componentSelectorLabels" (dict "ctx" . "component" "storage") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "tmdbwh.fullname" . }}-minio
+  labels:
+    {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "storage") | nindent 4 }}
+spec:
+  serviceName: {{ include "tmdbwh.fullname" . }}-minio
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "tmdbwh.componentSelectorLabels" (dict "ctx" . "component" "storage") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "storage") | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9000"
+    spec:
+      containers:
+        - name: minio
+          image: "{{ .Values.global.imageRegistry }}{{ .Values.minio.image.repository }}:{{ .Values.minio.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args: ["server", "/data", "--console-address", ":9001"]
+          env:
+            - name: MINIO_ROOT_USER
+              value: {{ .Values.minio.rootUser | quote }}
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.config.secretName }}
+                  key: minio-root-password
+                  optional: true
+          ports:
+            - containerPort: 9000
+            - containerPort: 9001
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: 9000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.minio.persistence.size }}
+{{- end }}
+{{- if .Values.postgres.enabled }}
+---
+# =============================================================================
+# Hive Metastore 元数据库（Iceberg Catalog 依赖）
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tmdbwh.fullname" . }}-postgres
+  labels:
+    {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "metastore-db") | nindent 4 }}
+spec:
+  ports:
+    - port: 5432
+      targetPort: 5432
+  selector:
+    {{- include "tmdbwh.componentSelectorLabels" (dict "ctx" . "component" "metastore-db") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "tmdbwh.fullname" . }}-postgres
+  labels:
+    {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "metastore-db") | nindent 4 }}
+spec:
+  serviceName: {{ include "tmdbwh.fullname" . }}-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "tmdbwh.componentSelectorLabels" (dict "ctx" . "component" "metastore-db") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "metastore-db") | nindent 8 }}
+    spec:
+      containers:
+        - name: postgres
+          image: "{{ .Values.global.imageRegistry }}{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          env:
+            - name: POSTGRES_USER
+              value: {{ .Values.hiveMetastore.database.user | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.config.secretName }}
+                  key: postgres-password
+                  optional: true
+            - name: POSTGRES_DB
+              value: {{ .Values.hiveMetastore.database.name | quote }}
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.postgres.persistence.size }}
+{{- end }}
+{{- if .Values.hiveMetastore.enabled }}
+---
+# =============================================================================
+# Hive Metastore：Iceberg Catalog 的元数据存储
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tmdbwh.fullname" . }}-hive-metastore
+  labels:
+    {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "metastore") | nindent 4 }}
+spec:
+  ports:
+    - port: 9083
+      targetPort: 9083
+  selector:
+    {{- include "tmdbwh.componentSelectorLabels" (dict "ctx" . "component" "metastore") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tmdbwh.fullname" . }}-hive-metastore
+  labels:
+    {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "metastore") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "tmdbwh.componentSelectorLabels" (dict "ctx" . "component" "metastore") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "tmdbwh.componentLabels" (dict "ctx" . "component" "metastore") | nindent 8 }}
+    spec:
+      containers:
+        - name: metastore
+          image: "{{ .Values.global.imageRegistry }}{{ .Values.hiveMetastore.image.repository }}:{{ .Values.hiveMetastore.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          env:
+            - name: HIVE_DB_HOST
+              value: {{ .Values.hiveMetastore.database.host | quote }}
+            - name: HIVE_DB_PORT
+              value: {{ .Values.hiveMetastore.database.port | quote }}
+            - name: HIVE_DB_NAME
+              value: {{ .Values.hiveMetastore.database.name | quote }}
+            - name: HIVE_DB_USER
+              value: {{ .Values.hiveMetastore.database.user | quote }}
+            - name: HIVE_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.config.secretName }}
+                  key: postgres-password
+                  optional: true
+            - name: S3_ENDPOINT
+              value: {{ include "tmdbwh.s3Endpoint" . | quote }}
+          ports:
+            - containerPort: 9083
+          readinessProbe:
+            tcpSocket:
+              port: 9083
+            initialDelaySeconds: 20
+            periodSeconds: 10
+{{- end }}

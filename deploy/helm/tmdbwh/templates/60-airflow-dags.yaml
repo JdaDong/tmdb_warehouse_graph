@@ -1,0 +1,20 @@
+# =============================================================================
+# DAG 以 ConfigMap 挂载到 Airflow（webserver / scheduler 共用）
+#
+# 说明：
+#   - chart 内 dags/ 目录是 airflow/dags/ 的副本，由 scripts/sync-dags.sh 同步；
+#     改 DAG 请改 airflow/dags/，然后执行 make sync-dags（或 scripts/sync-dags.sh）。
+#   - 生产建议改用 git-sync sidecar 从代码仓库拉取 DAG，
+#     避免"改了 DAG 还要重新 helm upgrade"的耦合（见 README.md）。
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "tmdbwh.fullname" . }}-dags
+  labels:
+    {{- include "tmdbwh.labels" . | nindent 4 }}
+data:
+{{- range $path, $_ := .Files.Glob "dags/*.py" }}
+  {{ $path | base }}: |
+{{- $.Files.Get $path | nindent 4 }}
+{{- end }}

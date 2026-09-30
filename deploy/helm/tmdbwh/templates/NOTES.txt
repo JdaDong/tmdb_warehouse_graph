@@ -1,0 +1,33 @@
+TMDB 数据仓库与知识图谱平台 已部署到命名空间 {{ .Release.Namespace }}
+
+1. 查看组件状态
+   kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+
+2. 先初始化（顺序不能颠倒：表结构 → 图约束 → 对象存储桶）
+   kubectl -n {{ .Release.Namespace }} create job tmdbwh-init --from=cronjob/...
+   或使用 cli 容器：
+   kubectl -n {{ .Release.Namespace }} run tmdbwh-cli --rm -it --restart=Never \
+     --image={{ .Values.global.imageRegistry }}tmdbwh/cli:1.0.0 \
+     -- java -jar /opt/tmdbwh/dist/governance.jar migrate
+   kubectl -n {{ .Release.Namespace }} run tmdbwh-cli --rm -it --restart=Never \
+     --image={{ .Values.global.imageRegistry }}tmdbwh/cli:1.0.0 \
+     -- java -jar /opt/tmdbwh/dist/graph.jar init
+
+3. 跑一次离线链路（业务日期必填）
+   kubectl -n {{ .Release.Namespace }} run tmdbwh-offline --rm -it --restart=Never \
+     --image={{ .Values.global.imageRegistry }}tmdbwh/cli:1.0.0 \
+     -- java -jar /opt/tmdbwh/dist/offline.jar run --date 2026-09-30 --sync
+
+4. 访问入口（kubectl port-forward）
+   ClickHouse HTTP : kubectl port-forward svc/{{ include "tmdbwh.fullname" . }}-clickhouse 8123:8123
+   Flink UI        : kubectl port-forward svc/{{ include "tmdbwh.fullname" . }}-flink-jobmanager 8081:8081
+   Spark UI        : kubectl port-forward svc/{{ include "tmdbwh.fullname" . }}-spark-master 4040:4040
+   Neo4j Browser   : kubectl port-forward svc/{{ include "tmdbwh.fullname" . }}-neo4j 7474:7474
+   Airflow         : kubectl port-forward svc/{{ include "tmdbwh.fullname" . }}-airflow 8080:8080
+   Grafana         : kubectl port-forward svc/{{ include "tmdbwh.fullname" . }}-grafana 3000:3000
+
+5. 重要提醒
+   - 本 Chart 是"单集群一体化"形态。生产环境请按 Chart.yaml 的注解改用各组件官方 Chart / Operator。
+   - 密钥（ClickHouse 口令、Neo4j 口令、S3 凭据、Airflow Fernet Key）必须写入 Secret
+     {{ .Values.config.secretName }}，不要提交到 values.yaml。
+   - 实时作业的并行度不能超过 Flink 总槽数：tmdbwh.realtime.parallelism <= taskmanager.replicas * slots。

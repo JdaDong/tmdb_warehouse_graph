@@ -1,0 +1,110 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "tmdbwh.fullname" . }}-config
+  labels:
+    {{- include "tmdbwh.labels" . | nindent 4 }}
+data:
+  # ---------------------------------------------------------------- 平台配置
+  # 与 config/application.conf 同源；密钥类配置一律来自 Secret（见下方 envFrom）
+  application.conf: |
+    tmdbwh {
+      env = "k8s"
+      business-zone = {{ .Values.config.businessZone | quote }}
+      s3 {
+        endpoint = {{ include "tmdbwh.s3Endpoint" . | quote }}
+        bucket = {{ include "tmdbwh.s3Bucket" . | quote }}
+        # 容器内通过 S3A 访问对象存储
+        path-style-access = true
+        lake-url = {{ printf "%s/%s/warehouse/" (include "tmdbwh.s3Endpoint" .) (include "tmdbwh.s3Bucket" .) | quote }}
+      }
+      clickhouse {
+        url = {{ printf "jdbc:clickhouse://%s-clickhouse:8123/default" (include "tmdbwh.fullname" .) | quote }}
+        cluster = {{ .Values.clickhouse.clusterName | quote }}
+      }
+      kafka {
+        bootstrap-servers = {{ printf "%s-kafka:9092" (include "tmdbwh.fullname" .) | quote }}
+      }
+      neo4j {
+        uri = {{ printf "bolt://%s-neo4j:7687" (include "tmdbwh.fullname" .) | quote }}
+      }
+      iceberg {
+        catalog-name = lake
+        catalog-type = hive
+        warehouse = {{ printf "s3a://%s/warehouse" (include "tmdbwh.s3Bucket" .) | quote }}
+        metastore-uri = {{ printf "thrift://%s-hive-metastore:9083" (include "tmdbwh.fullname" .) | quote }}
+      }
+      tmdb {
+        # 无 API Key 时可用 Mock 跑通链路（仅用于演示 / 联调）
+        mock = {{ .Values.config.tmdbMock }}
+      }
+    }
+  # ---------------------------------------------------------------- Hadoop / Spark
+  core-site.xml: |
+    <?xml version="1.0"?>
+    <configuration>
+      <property><name>fs.s3a.impl</name><value>org.apache.hadoop.fs.s3a.S3AFileSystem</value></property>
+      <property><name>fs.s3a.endpoint</name><value>{{ include "tmdbwh.s3Endpoint" . }}</value></property>
+      <property><name>fs.s3a.path.style.access</name><value>true</value></property>
+      <property><name>fs.s3a.connection.ssl.enabled</name>
+        <value>{{ if hasPrefix "https" (include "tmdbwh.s3Endpoint" .) }}true{{ else }}false{{ end }}</value></property>
+    </configuration>
+  spark-defaults.conf: |
+    spark.sql.extensions                       org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
+    spark.sql.catalog.lake                      org.apache.iceberg.spark.SparkCatalog
+    spark.sql.catalog.lake.type                 hive
+    spark.sql.catalog.lake.uri                  {{ printf "thrift://%s-hive-metastore:9083" (include "tmdbwh.fullname" .) }}
+    spark.sql.catalog.lake.warehouse            {{ printf "s3a://%s/warehouse" (include "tmdbwh.s3Bucket" .) }}
+    spark.sql.defaultCatalog                    lake
+    spark.sql.session.timeZone                  UTC
+    spark.sql.shuffle.partitions                8
+    spark.sql.sources.partitionOverwriteMode    dynamic
+    spark.serializer                            org.apache.spark.serializer.KryoSerializer
+    spark.hadoop.fs.s3a.impl                    org.apache.hadoop.fs.s3a.S3AFileSystem
+    spark.hadoop.fs.s3a.endpoint                {{ include "tmdbwh.s3Endpoint" . }}
+    spark.hadoop.fs.s3a.path.style.access       true
+    spark.eventLog.enabled                      true
+  # ---------------------------------------------------------------- 监控
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 30s
+    rule_files:
+      - /etc/prometheus/rules/*.yml
+    scrape_configs:
+      - job_name: clickhouse
+        static_configs:
+          - targets: ['{{ include "tmdbwh.fullname" . }}-clickhouse:9363']
+      - job_name: flink
+        static_configs:
+          - targets:
+              - '{{ include "tmdbwh.fullname" . }}-flink-jobmanager:9249'
+              - '{{ include "tmdbwh.fullname" . }}-flink-taskmanager:9249'
+      - job_name: spark
+        static_configs:
+          - targets: ['{{ include "tmdbwh.fullname" . }}-spark-master:4040']
+      - job_name: kafka
+        static_configs:
+          - targets: ['{{ include "tmdbwh.fullname" . }}-kafka-exporter:9308']
+      - job_name: neo4j
+        static_configs:
+          - targets: ['{{ include "tmdbwh.fullname" . }}-neo4j:2004']
+  alerts.yml: |
+    groups:
+      - name: tmdbwh
+        rules:
+          - alert: ClickHouseDown
+            expr: up{job="clickhouse"} == 0
+            for: 2m
+            labels: {severity: critical}
+            annotations: {summary: "ClickHouse 不可用"}
+          - alert: FlinkJobNotRunning
+            expr: flink_jobmanager_numRunningJobs == 0
+            for: 5m
+            labels: {severity: warning}
+            annotations: {summary: "Flink 集群中没有运行中的作业"}
+          - alert: RealtimeDataStale
+            expr: (time() - clickhouse_last_event_time) > 900
+            for: 5m
+            labels: {severity: warning}
+            annotations: {summary: "实时数据滞后超过 15 分钟"}
