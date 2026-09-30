@@ -160,3 +160,41 @@ down: ## 停止容器（保留数据卷）
 .PHONY: purge
 purge: ## 停止并删除数据卷（数据不可恢复）
 	scripts/teardown.sh --purge
+
+# ============================== 运行（在 Compose 环境内执行）==============================
+DATE ?=
+MODE ?= incremental
+JOB  ?= popularity-trend
+SUB  ?= migrate
+ARGS ?=
+
+.PHONY: ingest
+ingest: ## 采集：make ingest MODE=incremental DATE=2026-09-30
+	scripts/run/run-ingestion.sh $(MODE) $(DATE)
+
+.PHONY: offline
+offline: ## 离线链路：make offline DATE=2026-09-30 SYNC=--sync
+	scripts/run/run-offline.sh $(DATE) $(SYNC)
+
+.PHONY: realtime
+realtime: ## 实时作业：make realtime JOB=entity-change|popularity-trend|list
+	scripts/run/submit-flink.sh $(JOB)
+
+.PHONY: graph
+graph: ## 图任务：make graph SUB=stats ARGS='--table x'
+	scripts/run/load-graph.sh $(SUB) $(ARGS)
+
+.PHONY: governance
+governance: ## 治理任务：make governance SUB=quality ARGS=2026-09-30
+	scripts/run/governance.sh $(SUB) $(ARGS)
+
+.PHONY: smoke
+smoke: ## 端到端冒烟：make smoke [DATE=2026-09-30]
+	scripts/smoke.sh $(DATE)
+
+.PHONY: helm-lint
+helm-lint: ## 校验 Helm Chart（需要 helm CLI）
+	helm lint deploy/helm/tmdbwh
+
+.PHONY: ci
+ci: build validate-config ## CI 等价流程：构建 + 静态校验

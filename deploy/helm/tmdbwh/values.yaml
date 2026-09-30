@@ -1,0 +1,196 @@
+# =============================================================================
+# 默认值针对"演示 / 小规模生产"：单副本、较小内存。
+# 生产请按 docs/07-deployment.md 的资源基线表调整。
+# =============================================================================
+global:
+  # 命名空间内所有组件共享的配置前缀
+  imageRegistry: ""
+  imagePullPolicy: IfNotPresent
+  # 对象存储：MinIO 或使用外部 S3（external.enabled=true 时不再部署 MinIO）
+  storageClass: ""
+
+# ---------------------------------------------------------------- 对象存储
+minio:
+  enabled: true
+  image:
+    repository: bitnamilegacy/minio
+    tag: "2024.5.10"
+  replicas: 1
+  # 与 .env.example 保持一致；生产请通过 secret 注入
+  rootUser: minioadmin
+  rootPassword: CHANGE_ME
+  buckets:
+    - tmdb-lake
+    - tmdb-cold
+  persistence:
+    size: 200Gi
+
+externalS3:
+  enabled: false
+  endpoint: ""
+  bucket: ""
+  accessKey: ""
+  secretKey: ""
+
+# ---------------------------------------------------------------- ClickHouse
+clickhouse:
+  enabled: true
+  image:
+    repository: clickhouse/clickhouse-server
+    tag: "24.3"
+  replicas: 1
+  # 集群名：与迁移脚本的 ON CLUSTER 一致
+  clusterName: tmdb_cluster
+  # 有状态服务，生产务必使用 SSD + 足够容量
+  persistence:
+    hotSize: 500Gi
+    coldSize: 2Ti
+  resources:
+    requests:
+      cpu: "2"
+      memory: 8Gi
+    limits:
+      cpu: "4"
+      memory: 16Gi
+  # 关键参数（与 deploy/compose/conf/clickhouse 保持一致）
+  settings:
+    max_memory_usage: "12000000000"
+    max_execution_time: "600"
+
+# ---------------------------------------------------------------- Kafka
+kafka:
+  enabled: true
+  image:
+    repository: apache/kafka
+    tag: "3.7.0"
+  replicas: 1
+  # KRaft 模式，不需要 ZooKeeper
+  clusterId: "tmdbwh-kraft-cluster"
+  topics:
+    - name: tmdb.entity.change
+      partitions: 6
+    - name: tmdb.popularity
+      partitions: 6
+    - name: tmdb.dlq
+      partitions: 3
+    - name: tmdb.alert
+      partitions: 3
+  persistence:
+    size: 200Gi
+
+# ---------------------------------------------------------------- Spark（离线）
+spark:
+  enabled: true
+  image:
+    repository: tmdbwh/spark
+    tag: "3.5.1"
+  master:
+    replicas: 1
+  worker:
+    replicas: 2
+    cores: 2
+    memory: 4g
+  # 作业 jar 与配置通过 ConfigMap / PVC 挂载
+  distPvc:
+    size: 5Gi
+
+# ---------------------------------------------------------------- Flink（实时）
+flink:
+  enabled: true
+  image:
+    repository: tmdbwh/flink
+    tag: "1.18.1"
+  jobmanager:
+    replicas: 1
+    memory: 2g
+  taskmanager:
+    replicas: 2
+    slots: 2
+    memory: 4g
+  # checkpoint 存储地址（对象存储）
+  checkpointDir: s3a://tmdb-lake/flink/checkpoints
+  savepointDir: s3a://tmdb-lake/flink/savepoints
+  # 生产建议用 Flink Kubernetes Operator 管理作业；这里用 initContainer 提交
+  jobs:
+    entityChange:
+      enabled: true
+    popularityTrend:
+      enabled: true
+
+# ---------------------------------------------------------------- Neo4j（图）
+neo4j:
+  enabled: true
+  image:
+    repository: neo4j
+    tag: "5.20.0-community"
+  auth:
+    user: neo4j
+    password: CHANGE_ME
+  persistence:
+    size: 100Gi
+  resources:
+    requests:
+      cpu: "2"
+      memory: 8Gi
+    limits:
+      cpu: "4"
+      memory: 16Gi
+
+# ---------------------------------------------------------------- Hive Metastore（Iceberg Catalog）
+hiveMetastore:
+  enabled: true
+  image:
+    repository: tmdbwh/hive-metastore
+    tag: "3.1.3"
+  database:
+    host: postgres
+    port: 5432
+    name: metastore
+    user: hive
+    password: CHANGE_ME
+
+postgres:
+  enabled: true
+  image:
+    repository: postgres
+    tag: "15.7-alpine"
+  persistence:
+    size: 50Gi
+
+# ---------------------------------------------------------------- Airflow（调度）
+airflow:
+  enabled: true
+  image:
+    repository: tmdbwh/airflow
+    tag: "2.9.2"
+  # 生产请用官方 Chart；这里用最小部署（webserver + scheduler）
+  executor: LocalExecutor
+  fernetKey: CHANGE_ME
+  webserverSecretKey: CHANGE_ME
+
+# ---------------------------------------------------------------- 监控
+monitoring:
+  enabled: true
+  # Prometheus / Grafana 建议使用 kube-prometheus-stack；
+  # 这里只部署抓取配置对应的 ConfigMap（告警规则与仪表盘复用 compose 下的配置）
+  prometheus:
+    image:
+      repository: prom/prometheus
+      tag: v2.52.0
+  grafana:
+    image:
+      repository: grafana/grafana
+      tag: "10.4.2"
+  pushgateway:
+    image:
+      repository: prom/pushgateway
+      tag: v1.8.0
+
+# ---------------------------------------------------------------- 平台配置
+config:
+  # 业务时区（影响"今天 / 昨天"的判定）
+  businessZone: UTC
+  # 是否使用 TMDB Mock（无 API Key 时用于跑通链路）
+  tmdbMock: true
+  # 由 Secret 注入，不写在 values 里
+  secretName: tmdbwh-secrets

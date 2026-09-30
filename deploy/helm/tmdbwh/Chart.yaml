@@ -1,0 +1,27 @@
+apiVersion: v2
+name: tmdbwh
+description: TMDB 数据仓库与知识图谱平台（离线 Spark + 实时 Flink + ClickHouse + Neo4j）
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - data-warehouse
+  - spark
+  - flink
+  - clickhouse
+  - neo4j
+home: https://github.com/tmdbwh/tmdb-warehouse-graph
+sources:
+  - https://github.com/tmdbwh/tmdb-warehouse-graph
+maintainers:
+  - name: data-platform
+annotations:
+  # 重要：本 Chart 面向"单集群一体化部署"，用于把 Compose 环境搬到 K8s。
+  # 生产环境建议拆分为多个 Chart，并对有状态组件使用官方 Chart / Operator：
+  #   ClickHouse  -> bitnami/clickhouse 或 Altinity Operator
+  #   Kafka       -> Strimzi Operator（KRaft）
+  #   MinIO       -> minio/minio Operator
+  #   Flink       -> Flink Kubernetes Operator（管理作业生命周期）
+  #   Airflow     -> apache-airflow/airflow
+  # 本 Chart 的价值在于：给出各组件的依赖顺序、配置挂载点与资源基线。
+  tmdbwh.io/deployment-target: single-cluster
