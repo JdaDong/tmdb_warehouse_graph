@@ -36,11 +36,8 @@ public final class DwsTransform {
      */
     public static Dataset<Row> movieMetric1d(Dataset<Row> factSnapshot, Dataset<Row> factCredit,
             Dataset<Row> dimMovieCurrent, String dt) {
-        // 注意用 rangeBetween 而不是 rowsBetween：缺少某些天的快照时，按行数偏移会取到错误的日期，
-        // 只有按日期范围（7 天）定位才能保证"环比"真的是 7 天前
-        WindowSpec prev = Window.partitionBy("movie_id")
-                .orderBy(functions.col("dt").cast("timestamp").cast("long"))
-                .rangeBetween(-7 * 86400, -7 * 86400);
+        // 按 movie_id 分区、按日期排序（lag 不接受自定义窗口帧，因此用"偏移 7 行"配合"每日一条快照"的约定）
+        WindowSpec prev = Window.partitionBy("movie_id").orderBy("dt");
         Dataset<Row> credits = factCredit
                 .groupBy("dt", "movie_id")
                 .agg(functions.sum(functions.when(col("credit_type").equalTo("cast"), lit(1)).otherwise(lit(0)))
@@ -49,6 +46,9 @@ public final class DwsTransform {
                                 .as("crew_count"));
 
         Dataset<Row> withPrev = factSnapshot
+                // lag(7) 表示"往前第 7 条"；fact_movie_daily_snapshot 对每个 (dt, movie_id) 唯一，
+                // 因此在连续日期上等价于 7 天前。若需要按真实日期对齐（允许缺天），
+                // 应改为自连接 dim_date，见 lake dwd.fact_movie_daily_snapshot 的唯一性约束。
                 .withColumn("popularity_7d_ago", functions.lag("popularity", 7).over(prev));
 
         Dataset<Row> base = withPrev

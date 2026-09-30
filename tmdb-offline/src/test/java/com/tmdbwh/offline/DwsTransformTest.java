@@ -32,13 +32,21 @@ class DwsTransformTest {
         }
     }
 
-    /** 构造快照事实：同一部电影连续 8 天，便于验证 7 日环比。 */
+    /**
+     * 构造快照事实：同一部电影连续 8 天（09-23 ~ 09-30）。
+     *
+     * <p>lag(7) 按行偏移，因此必须提供<b>连续</b>的每日快照；这也说明调用方应把历史快照一并传入，
+     * 而不是只传当天数据（见 DwsTransform 的注释）。
+     */
     private Dataset<Row> snapshots() {
-        return spark.createDataFrame(java.util.Arrays.asList(
-                        org.apache.spark.sql.RowFactory.create(java.sql.Date.valueOf("2026-09-23"), 1L, "A", 10.0, 8.0,
-                                100, 1000L, java.sql.Date.valueOf("2010-07-16")),
-                        org.apache.spark.sql.RowFactory.create(java.sql.Date.valueOf("2026-09-30"), 1L, "A", 20.0, 8.1,
-                                110, 1000L, java.sql.Date.valueOf("2010-07-16"))),
+        java.util.List<org.apache.spark.sql.Row> rows = new java.util.ArrayList<>();
+        java.time.LocalDate start = java.time.LocalDate.of(2026, 9, 23);
+        double[] popularity = {10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 20.0};
+        for (int i = 0; i < popularity.length; i++) {
+            rows.add(org.apache.spark.sql.RowFactory.create(java.sql.Date.valueOf(start.plusDays(i)), 1L, "A",
+                    popularity[i], 8.0, 100, 1000L, java.sql.Date.valueOf("2010-07-16")));
+        }
+        return spark.createDataFrame(rows,
                 new org.apache.spark.sql.types.StructType()
                         .add("dt", org.apache.spark.sql.types.DataTypes.DateType)
                         .add("movie_id", org.apache.spark.sql.types.DataTypes.LongType)

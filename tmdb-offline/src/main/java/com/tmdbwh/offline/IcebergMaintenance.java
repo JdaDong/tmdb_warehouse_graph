@@ -68,8 +68,10 @@ public final class IcebergMaintenance {
      */
     public static List<String> run(SparkSession spark, String table, boolean expire, boolean orphan,
             boolean compact, boolean dryRun) {
-        Objects.requireNonNull(spark, "spark");
         List<String> sql = new ArrayList<>();
+        if (spark == null && !dryRun) {
+            throw new IllegalArgumentException("dryRun=false 时必须提供 SparkSession");
+        }
         if (expire) {
             sql.add(expireSnapshots(table, 7));
         }

@@ -47,6 +47,9 @@ public final class OfflineSqlRunner {
         this.lakeUrl = lakeUrl == null || lakeUrl.isEmpty() ? "${tmdbwh.s3.lake-url}" : withTrailingSlash(lakeUrl);
     }
 
+    /** 湖仓地址占位符（渲染时由配置替换）。 */
+    public static final String LAKE_URL_PLACEHOLDER = "${tmdbwh.s3.lake-url}";
+
     private static String withTrailingSlash(String url) {
         return url.endsWith("/") ? url : url + "/";
     }
@@ -158,7 +161,7 @@ public final class OfflineSqlRunner {
      */
     public static String sourceOf(String database, String table, String dt) {
         // 不传湖仓地址时保留配置占位符，由配置渲染阶段替换为真实地址
-        return sourceOf("", database, table, dt);
+        return sourceOf(LAKE_URL_PLACEHOLDER, database, table, dt);
     }
 
     /**
@@ -169,6 +172,7 @@ public final class OfflineSqlRunner {
      */
     public static String sourceOf(String lakeUrl, String database, String table, String dt) {
         String base = lakeUrl.isEmpty() || lakeUrl.endsWith("/") ? lakeUrl : lakeUrl + "/";
+        // 占位符本身以 } 结尾，不再追加斜杠，路径由配置提供
         return "s3('" + base + database + "." + table + "/dt=" + dt + "/*.parquet'"
                 + ", '${tmdbwh.s3.access-key}', '${tmdbwh.s3.secret-key}', 'Parquet')";
     }

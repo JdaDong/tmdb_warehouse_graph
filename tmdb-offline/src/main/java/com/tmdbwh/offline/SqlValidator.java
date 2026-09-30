@@ -139,11 +139,38 @@ public final class SqlValidator {
     private static void checkBalance(Result result, String sql, char open, char close) {
         int depth = 0;
         boolean inString = false;
+        boolean inLineComment = false;
+        boolean inBlockComment = false;
         for (int i = 0; i < sql.length(); i++) {
             char c = sql.charAt(i);
+            char next = i + 1 < sql.length() ? sql.charAt(i + 1) : '\0';
+            // 注释里的括号不算：SQL 文件的说明文字常出现 (...)
+            if (inLineComment) {
+                if (c == '\n') {
+                    inLineComment = false;
+                }
+                continue;
+            }
+            if (inBlockComment) {
+                if (c == '*' && next == '/') {
+                    inBlockComment = false;
+                    i++;
+                }
+                continue;
+            }
+            if (!inString && c == '-' && next == '-') {
+                inLineComment = true;
+                i++;
+                continue;
+            }
+            if (!inString && c == '/' && next == '*') {
+                inBlockComment = true;
+                i++;
+                continue;
+            }
             if (c == '\'') {
                 // ClickHouse 的转义是双写单引号（''），不是反斜杠
-                if (inString && i + 1 < sql.length() && sql.charAt(i + 1) == '\'') {
+                if (inString && next == '\'') {
                     i++;
                     continue;
                 }
